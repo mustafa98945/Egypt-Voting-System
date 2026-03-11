@@ -1,4 +1,4 @@
-require('dotenv').config();
+require('dotenv').conrequire('dotenv').config();
 const express = require('express');
 const cors = require('cors'); 
 const pool = require('./config/db'); 
@@ -9,7 +9,7 @@ const port = process.env.PORT || 3000;
 app.use(cors()); 
 app.use(express.json());
 
-// --- 1. الصفحة الرئيسية (The Dashboard) ---
+// --- الصفحة الرئيسية (Dashboard) بلينكات لكل الروابط ---
 app.get('/', (req, res) => {
     const baseUrl = "https://egypt-voting-system.onrender.com";
     res.status(200).send(`
@@ -19,41 +19,42 @@ app.get('/', (req, res) => {
             <meta charset="UTF-8">
             <title>لوحة تحكم API الانتخابات</title>
             <style>
-                body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f4f7f6; padding: 20px; text-align: center; }
+                body { font-family: 'Segoe UI', Tahoma, sans-serif; background: #f0f2f5; padding: 20px; text-align: center; }
                 .container { max-width: 800px; margin: auto; background: white; padding: 30px; border-radius: 15px; box-shadow: 0 5px 15px rgba(0,0,0,0.1); }
-                .api-card { border: 1px solid #ddd; padding: 15px; margin: 10px 0; border-radius: 10px; display: flex; justify-content: space-between; align-items: center; direction: ltr; }
-                .method { font-weight: bold; padding: 5px 10px; border-radius: 5px; width: 60px; text-align: center; }
-                .get { background: #d1ecf1; color: #0c5460; }
-                .post { background: #d4edda; color: #155724; }
-                .btn { background: #3498db; color: white; text-decoration: none; padding: 8px 15px; border-radius: 5px; font-size: 13px; }
+                .api-card { border: 1px solid #eee; padding: 15px; margin: 15px 0; border-radius: 12px; display: flex; justify-content: space-between; align-items: center; direction: ltr; }
+                .method { font-weight: bold; padding: 5px 12px; border-radius: 6px; font-size: 12px; width: 50px; text-align: center; }
+                .get { background: #e3f2fd; color: #1976d2; }
+                .post { background: #e8f5e9; color: #2e7d32; }
+                .path { font-family: monospace; font-weight: bold; margin-left: 10px; color: #333; }
+                .btn { background: #3498db; color: white; text-decoration: none; padding: 10px 20px; border-radius: 8px; font-size: 14px; font-weight: bold; }
                 .btn:hover { background: #2980b9; }
-                h2 { color: #2c3e50; }
+                h1 { color: #2c3e50; }
             </style>
         </head>
         <body>
             <div class="container">
-                <h2>🇪🇬 نظام انتخابات مصر - الـ API الخاص بك</h2>
-                <p>اضغط على "فتح" لرؤية النتيجة أو مثال للبيانات</p>
+                <h1>لوحة تحكم API مشروع الانتخابات 🇪🇬</h1>
+                <p style="color: #27ae60;">● السيرفر متصل أونلاين ويعمل بنجاح</p>
                 <hr>
-                
+
                 <div class="api-card">
-                    <div><span class="method get">GET</span> <span>/api/governorates</span></div>
-                    <a href="${baseUrl}/api/governorates" target="_blank" class="btn">فتح الداتا الحقيقية 🔗</a>
+                    <div><span class="method get">GET</span><span class="path">/api/governorates</span></div>
+                    <a href="${baseUrl}/api/governorates" target="_blank" class="btn">فتح البيانات 🔗</a>
                 </div>
 
                 <div class="api-card">
-                    <div><span class="method post">POST</span> <span>/api/analyze-address</span></div>
-                    <a href="${baseUrl}/help/analyze" target="_blank" class="btn" style="background: #7f8c8d;">رؤية مثال الـ JSON 📄</a>
+                    <div><span class="method post">POST</span><span class="path">/api/analyze-address</span></div>
+                    <a href="${baseUrl}/test/analyze" target="_blank" class="btn" style="background: #2c3e50;">رؤية المثال 📄</a>
                 </div>
 
                 <div class="api-card">
-                    <div><span class="method post">POST</span> <span>/api/register</span></div>
-                    <a href="${baseUrl}/help/register" target="_blank" class="btn" style="background: #7f8c8d;">رؤية مثال الـ JSON 📄</a>
+                    <div><span class="method post">POST</span><span class="path">/api/register</span></div>
+                    <a href="${baseUrl}/test/register" target="_blank" class="btn" style="background: #2c3e50;">رؤية المثال 📄</a>
                 </div>
 
                 <div class="api-card">
-                    <div><span class="method post">POST</span> <span>/api/login</span></div>
-                    <a href="${baseUrl}/help/login" target="_blank" class="btn" style="background: #7f8c8d;">رؤية مثال الـ JSON 📄</a>
+                    <div><span class="method post">POST</span><span class="path">/api/login</span></div>
+                    <a href="${baseUrl}/test/login" target="_blank" class="btn" style="background: #2c3e50;">رؤية المثال 📄</a>
                 </div>
             </div>
         </body>
@@ -61,30 +62,24 @@ app.get('/', (req, res) => {
     `);
 });
 
-// --- 2. صفحات المساعدة (لعرض شكل الـ POST Data) ---
-app.get('/help/:type', (req, res) => {
+// --- روابط المساعدة (Test endpoints) ---
+app.get('/test/:type', (req, res) => {
     const examples = {
-        analyze: { governorateId: 1, userAddress: "أنا ساكن في المنصورة شارع المشاية" },
-        register: { fullName: "Mustafa Ahmed", nationalId: "12345678901234", password: "123", email: "test@test.com" },
-        login: { nationalId: "12345678901234", password: "123" }
+        analyze: { governorateId: 1, userAddress: "شارع المشاية المنصورة" },
+        register: { fullName: "اسم المستخدم", nationalId: "2990101...", email: "user@example.com", password: "123" },
+        login: { nationalId: "2990101...", password: "123" }
     };
-    const data = examples[req.params.type] || { message: "No example found" };
-    res.json({ info: "This is a POST example. Use this structure in Flutter/Postman", example_body: data });
+    res.json({ note: "Example for POST request body", example_data: examples[req.params.type] || "Not Found" });
 });
 
-// --- 3. الـ API Endpoints الحقيقية ---
-
-// Get Governorates
+// --- الـ API Endpoints الأساسية ---
 app.get('/api/governorates', async (req, res) => {
     try {
         const result = await pool.query('SELECT * FROM governorates ORDER BY governorate_name ASC');
         res.json(result.rows);
-    } catch (error) {
-        res.status(500).json({ success: false, error: error.message });
-    }
+    } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Smart Suggestion
 app.post('/api/analyze-address', async (req, res) => {
     try {
         const { governorateId, userAddress } = req.body;
@@ -94,23 +89,21 @@ app.post('/api/analyze-address', async (req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Register
 app.post('/api/register', async (req, res) => {
     try {
         const { fullName, email, password, nationalId, dob, address, govId, adminUnitId } = req.body;
-        const query = `INSERT INTO voters (full_name, email, password_hash, national_id, date_of_birth, address, governorate_id, administrative_unit_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`;
+        const query = 'INSERT INTO voters (full_name, email, password_hash, national_id, date_of_birth, address, governorate_id, administrative_unit_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)';
         await pool.query(query, [fullName, email, password, nationalId, dob, address, govId, adminUnitId]);
-        res.json({ success: true, message: "Registered successfully" });
+        res.json({ success: true, message: "Registered" });
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Login
 app.post('/api/login', async (req, res) => {
     try {
         const { nationalId, password } = req.body;
         const result = await pool.query('SELECT * FROM voters WHERE national_id = $1 AND password_hash = $2', [nationalId, password]);
-        res.json(result.rows.length > 0 ? { success: true, user: result.rows[0] } : { success: false, message: "Invalid credentials" });
+        res.json(result.rows.length > 0 ? { success: true, user: result.rows[0] } : { success: false });
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.listen(port, () => { console.log(`Server running on port ${port}`); });
+app.listen(port, () => console.log(`Server running on port ${port}`));
