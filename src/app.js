@@ -9,37 +9,32 @@ const port = process.env.PORT || 3000;
 app.use(cors()); 
 app.use(express.json());
 
-// --- 1. الصفحة الرئيسية لـ Render ---
+// --- الصفحة الرئيسية ---
 app.get('/', (req, res) => {
-    res.status(200).send(`
-        <body style="font-family: sans-serif; text-align: center; background: #f1f5f9; padding: 50px;">
-            <h1 style="color: #1e293b;">Voter API Console 🇪🇬</h1>
-            <p style="color: #64748b;">النظام جاهز لتسجيل الناخبين واستنتاج المناطق نصياً</p>
-        </body>
-    `);
+    res.status(200).send('<h1>Voter API is Running Successfully 🇪🇬</h1>');
 });
 
-// --- 2. API تسجيل الناخبين ---
+// --- API تسجيل الناخبين (النصي) ---
 app.post('/api/register', async (req, res) => {
     try {
         const { fullName, email, password, nationalId, dob, address, govId } = req.body;
 
-        // جلب المناطق المتاحة للمحافظة (عشان نقارن بالعنوان)
+        // 1. جلب المناطق المتاحة للمحافظة المختارة
         const unitsResult = await pool.query(
             'SELECT unit_name FROM administrative_units WHERE governorate_id = $1', 
             [govId]
         );
 
-        // البحث الذكي عن اسم المنطقة داخل العنوان
+        // 2. البحث الذكي (مطابقة الكلمات من العنوان)
         const matched = unitsResult.rows.find(u => {
             const cleanUnitName = u.unit_name.replace(/مركز|قسم|حي|مدينة/g, '').trim();
             return address.includes(cleanUnitName);
         });
 
-        // النتيجة: يا الاسم يا "غير محدد"
+        // النتيجة النهائية: اسم المنطقة أو "غير محدد"
         const finalUnitName = matched ? matched.unit_name : "غير محدد";
 
-        // الحفظ في جدول voters (تطابق كامل مع عواميد الداتابيز عندك)
+        // 3. الحفظ في الداتابيز (تطابق مع العواميد اللي بعتها لي)
         const query = `
             INSERT INTO voters 
             (full_name, email, password_hash, national_id, date_of_birth, address, governorate_id, administrative_unit) 
@@ -64,12 +59,12 @@ app.post('/api/register', async (req, res) => {
         });
 
     } catch (e) { 
-        console.error("Registration Error:", e.message);
+        console.error("Internal Error:", e.message);
         res.status(500).json({ error: e.message }); 
     }
 });
 
-// --- 3. API جلب المحافظات ---
+// --- جلب المحافظات ---
 app.get('/api/governorates', async (req, res) => {
     try {
         const result = await pool.query('SELECT * FROM governorates ORDER BY governorate_name ASC');
@@ -77,16 +72,4 @@ app.get('/api/governorates', async (req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// --- 4. API تسجيل الدخول ---
-app.post('/api/login', async (req, res) => {
-    try {
-        const { nationalId, password } = req.body;
-        const result = await pool.query(
-            'SELECT * FROM voters WHERE national_id = $1 AND password_hash = $2', 
-            [nationalId, password]
-        );
-        res.json(result.rows.length > 0 ? { success: true, user: result.rows[0] } : { success: false });
-    } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-app.listen(port, () => console.log('Server Live on Port ' + port));
+app.listen(port, () => console.log('Server is online on ' + port));
