@@ -1,16 +1,22 @@
-const sql = require('mssql');
+const { Pool } = require('pg');
+require('dotenv').config(); 
 
-const config = {
-    user: 'sa',
-    password: 'M_desha.1744', 
-    server: '127.0.0.1', 
-    port: 1433,
-    database: 'Egypt Voting System', 
-    options: {
-        encrypt: false, 
-        trustServerCertificate: true
-    }
-};
+const pool = new Pool({
+  // بيقرأ الرابط من ملف الـ .env اللي عملناه
+  connectionString: process.env.DATABASE_URL,
+  ssl: {
+    // السطر ده ضروري جداً للربط مع Supabase و Render
+    rejectUnauthorized: false 
+  }
+});
 
-// أهم سطر: بنصدر الـ sql والـ config عشان app.js يشوفهم
-module.exports = { sql, config };
+// اختبار بسيط للتأكد من الاتصال أول ما السيرفر يقوم
+pool.connect((err, client, release) => {
+  if (err) {
+    return console.error('خطأ في الاتصال بقاعدة البيانات:', err.stack);
+  }
+  console.log('تم الاتصال بـ Supabase بنجاح! 🚀');
+  release();
+});
+
+module.exports = pool;

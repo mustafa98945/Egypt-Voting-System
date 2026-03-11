@@ -1,61 +1,61 @@
+require('dotenv').config(); // لازم يكون أول سطر
 const express = require('express');
 const cors = require('cors'); 
-const { sql, config } = require('./config/db');
+const pool = require('./config/db'); 
 
 const app = express();
-
-// التعديل هنا: السيرفر بياخد البورت من البيئة المحيطة (Render) أو 3000 كاحتياطي
 const port = process.env.PORT || 3000; 
 
+// Middlewares
 app.use(cors()); 
 app.use(express.json());
 
-// 1. Get All Governorates
+// --- الـ API Endpoints ---
+
+// 1. Get All Governorates (تحميل المحافظات)
 app.get('/api/governorates', async (req, res) => {
     try {
-        let pool = await sql.connect(config);
-        let result = await pool.request().query('SELECT * FROM Governorates');
-        res.json(result.recordset);
+        const result = await pool.query('SELECT * FROM governorates ORDER BY governorate_name ASC');
+        res.json(result.rows);
     } catch (error) {
         res.status(500).json({ success: false, error: error.message });
     }
 });
 
-// 2. Smart Administrative Unit Suggestion
-app.post('/api/suggest-unit', async (req, res) => {
+// 2. تحليل العنوان واقتراح الوحدة (بدون حفظ في الداتا)
+// ده اللي زميلك بتاع الفلاتر هيناديه أول ما المستخدم يصور البطاقة أو يكتب العنوان
+app.post('/api/analyze-address', async (req, res) => {
     try {
         const { governorateId, userAddress } = req.body;
-        if (!governorateId || !userAddress) {
-            return res.status(400).json({ success: false, error: "Governorate ID and Address are required" });
-        }
         
-        let pool = await sql.connect(config);
-        let result = await pool.request()
-            .input('govId', sql.BigInt, governorateId)
-            .query('SELECT Administrative_ID, [Unit Name] FROM [Administrative Unit] WHERE Governorate_ID = @govId');
+        // بنجيب كل الوحدات اللي تابعة للمحافظة المختارة
+        const result = await pool.query(
+            'SELECT administrative_id, unit_name FROM administrative_units WHERE governorate_id = $1',
+            [governorateId]
+        );
 
-        let units = result.recordset;
-        let matchedUnit = null;
-
-        for (let unit of units) {
-            let cleanUnitName = unit['Unit Name'].replace('مركز ', '').replace('قسم ', '').trim();
-            if (userAddress.includes(cleanUnitName)) {
-                matchedUnit = unit;
-                break; 
-            }
-        }
+        let units = result.rows;
+        
+        // منطق الفلترة: بنشيل كلمة "مركز" أو "قسم" عشان لو المستخدم كتب الاسم بس
+        let matchedUnit = units.find(unit => {
+            const cleanUnitName = unit.unit_name.replace('مركز ', '').replace('قسم ', '').trim();
+            return userAddress.includes(cleanUnitName);
+        });
 
         if (matchedUnit) {
+            // بنرد عليه باللي لقيناه ونستنى موافقة المستخدم في الفلاتر
             res.json({ 
                 success: true, 
-                unitId: matchedUnit.Administrative_ID, 
-                unitName: matchedUnit['Unit Name'] 
+                found: true,
+                unitId: matchedUnit.administrative_id, 
+                unitName: matchedUnit.unit_name,
+                message: `هل تقصد أنك تابع لـ (${matchedUnit.unit_name}) بناءً على عنوانك؟` 
             });
         } else {
             res.json({ 
-                success: false, 
-                errorCode: "UNIT_NOT_FOUND",
-                message: "Could not determine administrative unit automatically. Please select manually." 
+                success: true, 
+                found: false, 
+                message: "لم نستطع تحديد الوحدة تلقائياً، يرجى اختيارها يدوياً من القائمة." 
             });
         }
     } catch (error) {
@@ -63,26 +63,25 @@ app.post('/api/suggest-unit', async (req, res) => {
     }
 });
 
-// 3. Voter Registration
+// 3. Voter Registration (التسجيل النهائي بعد ضغطة OK)
 app.post('/api/register', async (req, res) => {
     try {
         const { fullName, email, password, nationalId, dob, address, govId, adminUnitId } = req.body;
-        let pool = await sql.connect(config);
-        await pool.request()
-            .input('name', sql.NVarChar, fullName)
-            .input('email', sql.NVarChar, email)
-            .input('pass', sql.NVarChar, password)
-            .input('nId', sql.BigInt, nationalId)
-            .input('dob', sql.Date, dob)
-            .input('address', sql.NVarChar, address)
-            .input('govId', sql.BigInt, govId)
-            .input('adminId', sql.BigInt, adminUnitId)
-            .query(`INSERT INTO Voter (Name, Email, Password, National_ID, Date_Of_Birth, Address, Governorate_ID, Administrative_ID) 
-                    VALUES (@name, @email, @pass, @nId, @dob, @address, @govId, @adminId)`);
+        
+        const query = `
+            INSERT INTO voters (full_name, email, password_hash, national_id, date_of_birth, address, governorate_id, administrative_unit_id) 
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`;
+        
+        const values = [fullName, email, password, nationalId, dob, address, govId, adminUnitId];
+        const result = await pool.query(query, values);
 
-        res.json({ success: true, message: "Voter registered successfully" });
+        res.json({ success: true, message: "تم تسجيل الناخب بنجاح في قاعدة البيانات", voterId: result.rows[0].voter_id });
     } catch (error) {
-        res.status(500).json({ success: false, error: error.message });
+        if (error.code === '23505') {
+            res.status(400).json({ success: false, message: "الرقم القومي أو البريد الإلكتروني مسجل مسبقاً" });
+        } else {
+            res.status(500).json({ success: false, error: error.message });
+        }
     }
 });
 
@@ -90,37 +89,21 @@ app.post('/api/register', async (req, res) => {
 app.post('/api/login', async (req, res) => {
     try {
         const { nationalId, password } = req.body;
-        let pool = await sql.connect(config);
-        let result = await pool.request()
-            .input('nId', sql.BigInt, nationalId)
-            .input('pass', sql.NVarChar, password)
-            .query('SELECT * FROM Voter WHERE National_ID = @nId AND Password = @pass');
+        const result = await pool.query(
+            'SELECT * FROM voters WHERE national_id = $1 AND password_hash = $2',
+            [nationalId, password]
+        );
 
-        if (result.recordset.length > 0) {
-            res.json({ success: true, message: "Login successful", user: result.recordset[0] });
+        if (result.rows.length > 0) {
+            res.json({ success: true, message: "تم تسجيل الدخول بنجاح", user: result.rows[0] });
         } else {
-            res.status(401).json({ success: false, message: "Invalid National ID or Password" });
+            res.status(401).json({ success: false, message: "الرقم القومي أو كلمة المرور غير صحيحة" });
         }
     } catch (error) {
         res.status(500).json({ success: false, error: error.message });
     }
 });
 
-// 5. Get Candidates for a specific Unit
-app.get('/api/candidates/:adminId', async (req, res) => {
-    try {
-        const { adminId } = req.params;
-        let pool = await sql.connect(config);
-        let result = await pool.request()
-            .input('adminId', sql.BigInt, adminId)
-            .query('SELECT * FROM Candidate WHERE Administrative_ID = @adminId');
-        res.json(result.recordset);
-    } catch (error) {
-        res.status(500).json({ success: false, error: error.message });
-    }
-});
-
-// تشغيل السيرفر
 app.listen(port, () => {
-    console.log(`Server is running successfully on port ${port}`);
+    console.log(`Server is running on port ${port}`);
 });
