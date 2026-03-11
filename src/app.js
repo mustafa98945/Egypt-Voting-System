@@ -104,6 +104,26 @@ app.post('/api/login', async (req, res) => {
     }
 });
 
+// الصفحة الرئيسية للـ API
+app.get('/', (req, res) => {
+    res.status(200).send(`
+        <div style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
+            <h1 style="color: #2c3e50;">Egypt Voting System API 🚀</h1>
+            <p style="font-size: 18px;">السيرفر يعمل بنجاح ومتصل بقاعدة البيانات</p>
+            <hr style="width: 50%; margin: 20px auto;">
+            <div style="background: #f4f4f4; display: inline-block; padding: 20px; border-radius: 10px; text-align: left;">
+                <strong>الروابط المتاحة حالياً:</strong>
+                <ul>
+                    <li><code>GET /api/governorates</code> - تحميل المحافظات</li>
+                    <li><code>POST /api/analyze-address</code> - تحليل العنوان (Smart Suggestion)</li>
+                    <li><code>POST /api/register</code> - تسجيل ناخب جديد</li>
+                    <li><code>POST /api/login</code> - تسجيل دخول</li>
+                </ul>
+            </div>
+        </div>
+    `);
+});
+
 app.listen(port, () => {
     console.log(`Server is running on port ${port}`);
 });
