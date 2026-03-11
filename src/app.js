@@ -53,10 +53,10 @@ app.post('/api/register', async (req, res) => {
 
         // 4. الحفظ في الداتابيز (تأكد من اسم العمود administrative_unit)
         const query = `
-            INSERT INTO voters 
-            (full_name, email, password_hash, national_id, date_of_birth, address, governorate_id, administrative_unit) 
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-        `;
+    INSERT INTO voters 
+    (full_name, email, password_hash, national_id, date_of_birth, address, governorate_id, administrative_unit) 
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+`;
         
         await pool.query(query, [
             fullName, 
