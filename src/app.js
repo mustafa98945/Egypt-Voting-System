@@ -38,7 +38,7 @@ app.get('/', (req, res) => {
         <body>
             <div class="container">
                 <h1>Voter API Console 🇪🇬</h1>
-                <p style="color: #64748b;">نظام الانتخابات الإلكتروني - بوابة الأكواد والخدمات</p>
+                <p style="color: #64748b;">نظام الانتخابات الإلكتروني - استنتاج المناطق تلقائياً (Smart Match)</p>
                 <div class="api-list">
                     <div class="api-card">
                         <div><span class="method get">GET</span> <span class="endpoint">/api/governorates</span></div>
@@ -52,10 +52,6 @@ app.get('/', (req, res) => {
                         <div><span class="method post">POST</span> <span class="endpoint">/api/login</span></div>
                         <a href="/view-logic/log" class="btn">عرض الكود </></a>
                     </div>
-                    <div class="api-card">
-                        <div><span class="method post">POST</span> <span class="endpoint">/api/analyze-address</span></div>
-                        <a href="/view-logic/anz" class="btn">عرض الكود </></a>
-                    </div>
                 </div>
                 <div class="footer">Mustafa - Smart Voting System Project 2026</div>
             </div>
@@ -68,9 +64,8 @@ app.get('/', (req, res) => {
 app.get('/view-logic/:type', (req, res) => {
     const codes = {
         gov: `// جلب المحافظات مرتبة أبجدياً\napp.get('/api/governorates', async (req, res) => {\n  const result = await pool.query('SELECT * FROM governorates ORDER BY governorate_name ASC');\n  res.json(result.rows);\n});`,
-        reg: `// تسجيل الناخب مع استنتاج تلقائي للمركز/القسم\napp.post('/api/register', async (req, res) => {\n  const { fullName, email, password, nationalId, dob, address, govId } = req.body;\n\n  // 1. استنتاج المركز من العنوان\n  const units = await pool.query('SELECT administrative_id, unit_name FROM administrative_units WHERE governorate_id = $1', [govId]);\n  const matched = units.rows.find(u => address.includes(u.unit_name.replace('مركز ', '').replace('قسم ', '').trim()));\n  const adminUnitId = matched ? matched.administrative_id : null;\n\n  // 2. الحفظ في الداتابيز\n  const query = 'INSERT INTO voters (full_name, email, password_hash, national_id, date_of_birth, address, governorate_id, administrative_unit_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)';\n  await pool.query(query, [fullName, email, password, nationalId, dob, address, govId, adminUnitId]);\n  \n  res.json({ success: true, inferredUnit: matched ? matched.unit_name : "Unknown" });\n});`,
-        log: `// التحقق من بيانات الدخول\napp.post('/api/login', async (req, res) => {\n  const { nationalId, password } = req.body;\n  const result = await pool.query('SELECT * FROM voters WHERE national_id = $1 AND password_hash = $2', [nationalId, password]);\n  res.json(result.rows.length > 0 ? { success: true, user: result.rows[0] } : { success: false });\n});`,
-        anz: `// تحليل العنوان بشكل منفصل\napp.post('/api/analyze-address', async (req, res) => {\n  const { governorateId, userAddress } = req.body;\n  const units = await pool.query('SELECT * FROM administrative_units WHERE governorate_id = $1', [governorateId]);\n  let matched = units.rows.find(u => userAddress.includes(u.unit_name.trim()));\n  res.json(matched ? { success: true, unitId: matched.administrative_id } : { success: false });\n});`
+        reg: `// تسجيل الناخب مع استنتاج تلقائي ذكي (Smart Matching)\napp.post('/api/register', async (req, res) => {\n  const { fullName, email, password, nationalId, dob, address, govId } = req.body;\n\n  // 1. استنتاج المركز/القسم من العنوان المكتوب\n  const units = await pool.query('SELECT administrative_id, unit_name FROM administrative_units WHERE governorate_id = $1', [govId]);\n  \n  const matched = units.rows.find(u => {\n    // تنظيف اسم المنطقة من (مركز/قسم/حي/مدينة) للمقارنة بمرونة\n    const cleanName = u.unit_name.replace(/مركز|قسم|حي|مدينة/g, '').trim();\n    return address.includes(cleanName);\n  });\n\n  const adminUnitId = matched ? matched.administrative_id : null;\n\n  // 2. الحفظ النهائي\n  const query = 'INSERT INTO voters (full_name, email, password_hash, national_id, date_of_birth, address, governorate_id, administrative_unit_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)';\n  await pool.query(query, [fullName, email, password, nationalId, dob, address, govId, adminUnitId]);\n  \n  res.json({ success: true, inferredUnit: matched ? matched.unit_name : "Not Determined" });\n});`,
+        log: `// تسجيل الدخول\napp.post('/api/login', async (req, res) => {\n  const { nationalId, password } = req.body;\n  const result = await pool.query('SELECT * FROM voters WHERE national_id = $1 AND password_hash = $2', [nationalId, password]);\n  res.json(result.rows.length > 0 ? { success: true, user: result.rows[0] } : { success: false });\n});`
     };
 
     const source = codes[req.params.type] || "// Code not found";
@@ -86,7 +81,7 @@ app.get('/view-logic/:type', (req, res) => {
     `);
 });
 
-// --- 3. الـ APIs الحقيقية للتشغيل (خدمة تطبيق الفلاتر) ---
+// --- 3. الـ APIs الحقيقية للتشغيل ---
 
 // جلب المحافظات
 app.get('/api/governorates', async (req, res) => {
@@ -101,16 +96,25 @@ app.post('/api/register', async (req, res) => {
     try {
         const { fullName, email, password, nationalId, dob, address, govId } = req.body;
         
-        // استنتاج المركز
+        // جلب الوحدات الإدارية التابعة للمحافظة المختار
         const unitsResult = await pool.query('SELECT administrative_id, unit_name FROM administrative_units WHERE governorate_id = $1', [govId]);
-        const matched = unitsResult.rows.find(u => address.includes(u.unit_name.replace('مركز ', '').replace('قسم ', '').trim()));
+        
+        // البحث الذكي: تنظيف اسم الوحدة من الكلمات الزائدة قبل المطابقة
+        const matched = unitsResult.rows.find(u => {
+            const cleanUnitName = u.unit_name.replace(/مركز|قسم|حي|مدينة/g, '').trim();
+            return address.includes(cleanUnitName);
+        });
+
         const adminUnitId = matched ? matched.administrative_id : null;
 
-        // الحفظ
+        // الحفظ في قاعدة البيانات
         const query = 'INSERT INTO voters (full_name, email, password_hash, national_id, date_of_birth, address, governorate_id, administrative_unit_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)';
         await pool.query(query, [fullName, email, password, nationalId, dob, address, govId, adminUnitId]);
 
-        res.json({ success: true, inferredUnit: matched ? matched.unit_name : "Not Found" });
+        res.json({ 
+            success: true, 
+            inferredUnit: matched ? matched.unit_name : "Not Found (Saved as Null)" 
+        });
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
