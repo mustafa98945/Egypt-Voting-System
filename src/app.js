@@ -14,7 +14,7 @@ app.post('/api/register', async (req, res) => {
         // 1. جلب المناطق
         const unitsResult = await pool.query('SELECT unit_name FROM administrative_units WHERE governorate_id = $1', [govId]);
 
-        // 2. مطابقة ذكية
+        // 2. البحث عن تطابق
         const matched = unitsResult.rows.find(u => {
             const clean = u.unit_name.replace(/مركز|قسم|حي|مدينة/g, '').trim();
             return address.includes(clean);
@@ -22,7 +22,7 @@ app.post('/api/register', async (req, res) => {
 
         const finalUnit = matched ? matched.unit_name : "غير محدد";
 
-        // 3. الحفظ (الأسامي هنا مطابقة للـ SQL اللي فوق بالظبط)
+        // 3. الحفظ في جدول voters
         const query = `
             INSERT INTO voters 
             (full_name, email, password_hash, national_id, date_of_birth, address, governorate_id, administrative_unit) 
@@ -31,11 +31,15 @@ app.post('/api/register', async (req, res) => {
         
         await pool.query(query, [fullName, email, password, nationalId, dob, address, govId, finalUnit]);
 
-        res.json({ success: true, message: "Registered!", savedUnit: finalUnit });
+        res.json({ 
+            success: true, 
+            message: "User Registered Successfully", 
+            savedAs: finalUnit 
+        });
 
     } catch (e) { 
         res.status(500).json({ error: e.message }); 
     }
 });
 
-app.listen(process.env.PORT || 3000, () => console.log('Server Ready'));
+app.listen(process.env.PORT || 3000, () => console.log('Ready!'));
