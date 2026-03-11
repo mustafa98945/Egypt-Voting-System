@@ -15,7 +15,7 @@ app.post('/api/register', async (req, res) => {
     try {
         const { fullName, email, password, nationalId, dob, address, govName } = req.body;
 
-        // 1. جلب الـ ID الخاص بالمحافظة من اسمها
+        // 1. جلب الـ ID الخاص بالمحافظة للتأكد من وجودها
         const govResult = await pool.query(
             'SELECT governorate_id FROM governorates WHERE governorate_name = $1', 
             [govName]
@@ -27,7 +27,7 @@ app.post('/api/register', async (req, res) => {
 
         const govId = govResult.rows[0].governorate_id;
 
-        // 2. جلب المناطق المتاحة لهذه المحافظة للمطابقة
+        // 2. جلب المناطق المتاحة للمطابقة
         const units = await pool.query(
             'SELECT unit_name FROM administrative_units WHERE governorate_id = $1', 
             [govId]
@@ -39,7 +39,7 @@ app.post('/api/register', async (req, res) => {
         );
         const finalUnit = matched ? matched.unit_name : "Not Determined";
 
-        // 4. الحفظ النهائي باستخدام الـ govId اللي جبناه من الاسم
+        // 4. الحفظ في الداتابيز
         const query = `
             INSERT INTO voters 
             (full_name, email, password_hash, national_id, date_of_birth, address, governorate_id, administrative_unit) 
@@ -48,10 +48,11 @@ app.post('/api/register', async (req, res) => {
         
         await pool.query(query, [fullName, email, password, nationalId, dob, address, govId, finalUnit]);
 
+        // 5. النتيجة النهائية بالأسماء مش الأرقام
         res.json({ 
             success: true, 
             message: "Registered Successfully", 
-            detectedGovId: govId,
+            govName: govName, // رجعنا الاسم بدل الـ ID
             savedUnit: finalUnit 
         });
 
