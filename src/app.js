@@ -56,7 +56,7 @@ app.post('/api/register', async (req, res) => {
     INSERT INTO voters 
     (full_name, email, password_hash, national_id, date_of_birth, address, governorate_id, administrative_unit) 
     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-`;
+`;له
         
         await pool.query(query, [
             fullName, 
