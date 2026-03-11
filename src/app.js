@@ -13,19 +13,51 @@ app.get('/', (req, res) => res.send('Voter System API is LIVE 🇪🇬'));
 // 2. كود التسجيل (اللي نجح معاك في Postman)
 app.post('/api/register', async (req, res) => {
     try {
-        const { fullName, email, password, nationalId, dob, address, govId } = req.body;
-        const units = await pool.query('SELECT unit_name FROM administrative_units WHERE governorate_id = $1', [govId]);
-        const matched = units.rows.find(u => address.includes(u.unit_name.replace(/مركز|قسم|حي|مدينة/g, '').trim()));
+        const { fullName, email, password, nationalId, dob, address, govName } = req.body;
+
+        // 1. جلب الـ ID الخاص بالمحافظة من اسمها
+        const govResult = await pool.query(
+            'SELECT governorate_id FROM governorates WHERE governorate_name = $1', 
+            [govName]
+        );
+
+        if (govResult.rows.length === 0) {
+            return res.status(400).json({ success: false, message: "Governorate name not found" });
+        }
+
+        const govId = govResult.rows[0].governorate_id;
+
+        // 2. جلب المناطق المتاحة لهذه المحافظة للمطابقة
+        const units = await pool.query(
+            'SELECT unit_name FROM administrative_units WHERE governorate_id = $1', 
+            [govId]
+        );
+
+        // 3. البحث عن تطابق المنطقة (Smart Match)
+        const matched = units.rows.find(u => 
+            address.includes(u.unit_name.replace(/مركز|قسم|حي|مدينة/g, '').trim())
+        );
         const finalUnit = matched ? matched.unit_name : "Not Determined";
 
+        // 4. الحفظ النهائي باستخدام الـ govId اللي جبناه من الاسم
         const query = `
             INSERT INTO voters 
             (full_name, email, password_hash, national_id, date_of_birth, address, governorate_id, administrative_unit) 
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
         `;
+        
         await pool.query(query, [fullName, email, password, nationalId, dob, address, govId, finalUnit]);
-        res.json({ success: true, message: "Registered Successfully", savedUnit: finalUnit });
-    } catch (e) { res.status(500).json({ error: e.message }); }
+
+        res.json({ 
+            success: true, 
+            message: "Registered Successfully", 
+            detectedGovId: govId,
+            savedUnit: finalUnit 
+        });
+
+    } catch (e) { 
+        res.status(500).json({ error: e.message }); 
+    }
 });
 
 // 3. كود تسجيل الدخول (الـ Login)
