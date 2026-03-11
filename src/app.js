@@ -61,17 +61,27 @@ app.post('/api/register', async (req, res) => {
     }
 });
 
+
 // 3. كود تسجيل الدخول (الـ Login)
 app.post('/api/login', async (req, res) => {
     try {
         const { nationalId, password } = req.body;
         
-        // البحث عن المستخدم بالرقم القومي والباسورد
+        // استخدام JOIN لجلب اسم المحافظة بدل الـ ID
         const query = `
-            SELECT voter_id, full_name, email, national_id, governorate_id, administrative_unit, has_voted 
-            FROM voters 
-            WHERE national_id = $1 AND password_hash = $2
+            SELECT 
+                v.voter_id, 
+                v.full_name, 
+                v.email, 
+                v.national_id, 
+                g.governorate_name AS govName, -- هنا جبنا الاسم
+                v.administrative_unit AS savedUnit, 
+                v.has_voted 
+            FROM voters v
+            JOIN governorates g ON v.governorate_id = g.governorate_id
+            WHERE v.national_id = $1 AND v.password_hash = $2
         `;
+        
         const result = await pool.query(query, [nationalId, password]);
 
         if (result.rows.length > 0) {
@@ -83,9 +93,10 @@ app.post('/api/login', async (req, res) => {
         } else {
             res.status(401).json({ success: false, message: "Invalid National ID or Password" });
         }
-    } catch (e) { res.status(500).json({ error: e.message }); }
+    } catch (e) { 
+        res.status(500).json({ error: e.message }); 
+    }
 });
-
 // 4. كود جلب المحافظات (عشان الـ Dropdown في الفرونت)
 app.get('/api/governorates', async (req, res) => {
     try {
