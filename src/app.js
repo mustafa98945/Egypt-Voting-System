@@ -8,7 +8,53 @@ app.use(cors());
 app.use(express.json());
 
 // 1. تجربة السيرفر (Home)
-app.get('/', (req, res) => res.send('Voter System API is LIVE 🇪🇬'));
+app.get('/', (req, res) => {
+    res.send(`
+        <html>
+            <head>
+                <title>Egypt Voting System API</title>
+                <style>
+                    body { 
+                        background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%); 
+                        color: white; 
+                        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+                        display: flex; 
+                        justify-content: center; 
+                        align-items: center; 
+                        height: 100vh; 
+                        margin: 0; 
+                        text-align: center;
+                    }
+                    .container { 
+                        background: rgba(255, 255, 255, 0.1); 
+                        padding: 30px; 
+                        border-radius: 15px; 
+                        box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.37);
+                        backdrop-filter: blur(4px);
+                        border: 1px solid rgba(255, 255, 255, 0.18);
+                    }
+                    h1 { margin-bottom: 10px; font-size: 2.5rem; }
+                    p { font-size: 1.2rem; opacity: 0.9; }
+                    .status { 
+                        display: inline-block; 
+                        margin-top: 20px; 
+                        padding: 10px 20px; 
+                        background: #27ae60; 
+                        border-radius: 50px; 
+                        font-weight: bold; 
+                    }
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <h1>🇪🇬 Egypt Voting System</h1>
+                    <p>The Backend API is running smoothly</p>
+                    <div class="status">● System Online</div>
+                </div>
+            </body>
+        </html>
+    `);
+});
 
 // 2. كود التسجيل (اللي نجح معاك في Postman)
 app.post('/api/register', async (req, res) => {
