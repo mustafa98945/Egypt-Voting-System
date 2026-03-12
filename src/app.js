@@ -10,8 +10,74 @@ app.use(cors());
 app.use(express.json());
 
 // --- الصفحة الرئيسية ---
+// --- الصفحة الرئيسية الاحترافية ---
 app.get('/', (req, res) => {
-    res.send('<h1>🇪🇬 Egypt Voting System API is Live</h1>');
+    res.send(`
+    <!DOCTYPE html>
+    <html lang="ar" dir="rtl">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>نظام التصويت الإلكتروني المصري</title>
+        <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;700&display=swap" rel="stylesheet">
+        <style>
+            body {
+                font-family: 'Tajawal', sans-serif;
+                background-color: #f4f4f4;
+                margin: 0;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                height: 100vh;
+                text-align: center;
+            }
+            .container {
+                background: white;
+                padding: 40px;
+                border-radius: 15px;
+                box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+                border-top: 10px solid #ce1126; /* لون علم مصر الأحمر */
+            }
+            .flag-strip {
+                display: flex;
+                height: 10px;
+                width: 100%;
+                position: absolute;
+                top: 0;
+                left: 0;
+            }
+            h1 { color: #333; margin-bottom: 10px; }
+            p { color: #666; font-size: 1.1em; }
+            .status {
+                display: inline-block;
+                padding: 10px 20px;
+                background: #28a745;
+                color: white;
+                border-radius: 50px;
+                font-weight: bold;
+                margin-top: 20px;
+            }
+            .api-link {
+                margin-top: 30px;
+                font-size: 0.9em;
+                color: #007bff;
+            }
+            .footer { margin-top: 20px; font-size: 0.8em; color: #999; }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>🇪🇬 منظومة الانتخابات الإلكترونية</h1>
+            <p>نظام التصويت الرقمي المؤمن لجمهورية مصر العربية</p>
+            <div class="status">السيرفر يعمل بنجاح (Live)</div>
+            <div class="api-link">
+                المسار الرئيسي للملفات: <code>/api/governorates</code>
+            </div>
+            <div class="footer">تطوير مصطفى - 2026</div>
+        </div>
+    </body>
+    </html>
+    `);
 });
 
 // --- API التسجيل مع استنتاج المركز تلقائياً ---
