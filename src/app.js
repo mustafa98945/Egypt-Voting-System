@@ -1,7 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors'); 
-const pool = require('./config/db'); // تأكد إن الفولدر ده موجود والملف جواه
+const pool = require('./config/db'); 
 const bcrypt = require('bcrypt'); 
 const jwt = require('jsonwebtoken');
 
@@ -14,26 +14,24 @@ app.get('/', (req, res) => {
     res.send('<h1>🇪🇬 Egypt Voting System API is Live</h1>');
 });
 
-// --- API التسجيل ---
+// --- API التسجيل مع استنتاج المركز تلقائياً ---
 app.post('/api/register', async (req, res) => {
-    // شلنا الـ unit_name من هنا لأننا هنطلعه من الـ address
     const { 
         full_name, email, password, national_id, 
         birth_date, governorate_name, address, face_signature 
     } = req.body;
 
-    // 1. التعديل هنا: شلنا الـ unit_name من شرط الـ Validation
     if (!email || !password || !national_id || !address || !governorate_name) {
         return res.status(400).json({
             "success": false,
-            "message": "بيانات ناقصة: تأكد من إدخال الإيميل، الباسورد، الرقم القومي، والمحافظة، والعنوان كما في البطاقة"
+            "message": "بيانات ناقصة: تأكد من إدخال الإيميل، الباسورد، الرقم القومي، والمحافظة، والعنوان"
         });
     }
 
     try {
         const hashedPassword = await bcrypt.hash(password, 10);
 
-        // 2. الـ SQL Query اللي بتدور على اسم المركز جوه نص العنوان
+        // البحث عن المركز داخل نص العنوان
         const unitQuery = await pool.query(
             `SELECT au.administrative_id, au.unit_name 
              FROM administrative_units au
@@ -47,13 +45,12 @@ app.post('/api/register', async (req, res) => {
         if (unitQuery.rows.length === 0) {
             return res.status(400).json({ 
                 "success": false, 
-                "message": "عذراً، لم نستطع تحديد المركز/القسم من العنوان المكتوب. تأكد من كتابة اسم المركز بوضوح (مثلاً: مركز الدلنجات)" 
+                "message": "عذراً، لم نستطع تحديد المركز من العنوان. اكتب اسم المركز بوضوح." 
             });
         }
 
         const detectedUnit = unitQuery.rows[0];
 
-        // 3. الحفظ النهائي باستخدام الوحدة المستنتجة
         const newUser = await pool.query(
             `INSERT INTO voters (
                 full_name, email, password_hash, national_id, 
@@ -74,12 +71,11 @@ app.post('/api/register', async (req, res) => {
     }
 });
 
-// --- API تسجيل الدخول (الـ Login) ---
-aapp.post('/api/login', async (req, res) => {
+// --- API تسجيل الدخول وعرض البيانات كاملة ---
+app.post('/api/login', async (req, res) => {
     const { email, password } = req.body;
 
     try {
-        // Query بتجيب بيانات المستخدم + اسم المحافظة بتاعته
         const userQuery = `
             SELECT v.*, g.governorate_name 
             FROM voters v
@@ -93,12 +89,9 @@ aapp.post('/api/login', async (req, res) => {
         }
 
         const user = userResult.rows[0];
-
-        // التأكد من الباسورد
         const isMatch = await bcrypt.compare(password, user.password_hash);
         if (!isMatch) return res.status(401).json({ "success": false, "message": "كلمة المرور خطأ" });
 
-        // الرد اللي هيطلعلك فيه كل معلومات التسجيل
         res.json({
             "success": true,
             "message": "تم تسجيل الدخول بنجاح",
@@ -109,9 +102,8 @@ aapp.post('/api/login', async (req, res) => {
                 "birth_date": user.date_of_birth,
                 "address_on_card": user.address,
                 "governorate": user.governorate_name,
-                "detected_administrative_unit": user.administrative_unit, // دي اللي استنتجناها من العنوان
-                "has_voted": user.has_voted,
-                "created_at": user.created_at
+                "detected_administrative_unit": user.administrative_unit,
+                "has_voted": user.has_voted
             }
         });
 
@@ -121,25 +113,27 @@ aapp.post('/api/login', async (req, res) => {
     }
 });
 
-// 4. كود جلب المحافظات (عشان القائمة المنسدلة في التطبيق)
-// GET /api/governorates
+// --- API جلب المحافظات ---
 app.get('/api/governorates', async (req, res) => {
     try {
-        // Query بتجيب كل المحافظات من الجدول اللي رفعناه من الـ PDF
         const result = await pool.query('SELECT * FROM governorates ORDER BY governorate_name ASC');
-        
-        // إرجاع البيانات في شكل Array
-        res.json({
-            "success": true,
-            "count": result.rows.length,
-            "data": result.rows
-        });
+        res.json({ "success": true, "data": result.rows });
     } catch (err) {
-        console.error("Error fetching governorates:", err);
-        res.status(500).json({ 
-            "success": false, 
-            "message": "خطأ في جلب بيانات المحافظات" 
-        });
+        res.status(500).json({ "success": false, "message": "خطأ في جلب المحافظات" });
+    }
+});
+
+// --- API جلب المراكز بناءً على المحافظة ---
+app.get('/api/units/:govId', async (req, res) => {
+    const { govId } = req.params;
+    try {
+        const result = await pool.query(
+            'SELECT * FROM administrative_units WHERE governorate_id = $1 ORDER BY unit_name ASC',
+            [govId]
+        );
+        res.json({ "success": true, "data": result.rows });
+    } catch (err) {
+        res.status(500).json({ "success": false, "message": "خطأ في جلب المراكز" });
     }
 });
 
