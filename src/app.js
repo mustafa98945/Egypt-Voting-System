@@ -75,11 +75,11 @@ app.post('/api/register', async (req, res) => {
 });
 
 // --- API تسجيل الدخول (الـ Login) ---
-app.post('/api/login', async (req, res) => {
-    const { email, password, face_features } = req.body;
+aapp.post('/api/login', async (req, res) => {
+    const { email, password } = req.body;
 
     try {
-        // Query مع JOIN لجلب المحافظة زي ما طلبت في الـ Commit
+        // Query بتجيب بيانات المستخدم + اسم المحافظة بتاعته
         const userQuery = `
             SELECT v.*, g.governorate_name 
             FROM voters v
@@ -94,35 +94,52 @@ app.post('/api/login', async (req, res) => {
 
         const user = userResult.rows[0];
 
-        // التحقق من الباسورد أو الوجه بناءً على الـ Architecture المرفقة
-        if (password) {
-            const isMatch = await bcrypt.compare(password, user.password_hash);
-            if (!isMatch) return res.status(401).json({ "success": false, "message": "الباسورد غلط" });
-        } else if (face_features) {
-            // منطق الـ Matching Process (خطوة 2 في صورة الـ Face Login)
-            const faceMatch = await pool.query(
-                'SELECT voter_id FROM voters WHERE voter_id = $1 AND face_signature <-> $2 < 0.1',
-                [user.voter_id, face_features]
-            );
-            if (faceMatch.rows.length === 0) return res.status(401).json({ "success": false, "message": "الوجه غير مطابق" });
-        }
+        // التأكد من الباسورد
+        const isMatch = await bcrypt.compare(password, user.password_hash);
+        if (!isMatch) return res.status(401).json({ "success": false, "message": "كلمة المرور خطأ" });
 
-        const token = jwt.sign({ id: user.voter_id }, process.env.JWT_SECRET, { expiresIn: '1h' });
-
+        // الرد اللي هيطلعلك فيه كل معلومات التسجيل
         res.json({
             "success": true,
-            "token": token,
-            "user": {
-                "voter_id": user.voter_id,
+            "message": "تم تسجيل الدخول بنجاح",
+            "user_data": {
                 "full_name": user.full_name,
+                "email": user.email,
+                "national_id": user.national_id,
+                "birth_date": user.date_of_birth,
+                "address_on_card": user.address,
                 "governorate": user.governorate_name,
-                "administrative_unit": user.administrative_unit,
-                "has_voted": user.has_voted
+                "detected_administrative_unit": user.administrative_unit, // دي اللي استنتجناها من العنوان
+                "has_voted": user.has_voted,
+                "created_at": user.created_at
             }
         });
+
     } catch (err) {
-        console.error("Login Error:", err);
+        console.error(err);
         res.status(500).json({ "success": false, "message": "خطأ في السيرفر" });
+    }
+});
+
+// 4. كود جلب المحافظات (عشان القائمة المنسدلة في التطبيق)
+// GET /api/governorates
+app.get('/api/governorates', async (req, res) => {
+    try {
+        // Query بتجيب كل المحافظات من الجدول اللي رفعناه من الـ PDF
+        const result = await pool.query('SELECT * FROM governorates ORDER BY governorate_name ASC');
+        
+        // إرجاع البيانات في شكل Array
+        res.json({
+            "success": true,
+            "count": result.rows.length,
+            "data": result.rows
+        });
+    } catch (err) {
+        console.error("Error fetching governorates:", err);
+        res.status(500).json({ 
+            "success": false, 
+            "message": "خطأ في جلب بيانات المحافظات" 
+        });
     }
 });
 
