@@ -2,6 +2,8 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors'); 
 const pool = require('./config/db'); 
+const bcrypt = require('bcrypt'); // سيبنا النسخة دي بس في أول الملف ونقدر نستخدمها في أي مكان تحت
+const jwt = require('jsonwebtoken');
 
 const app = express();
 app.use(cors()); 
@@ -56,10 +58,7 @@ app.get('/', (req, res) => {
     `);
 });
 
-// 2. كود التسجيل (اللي نجح معاك في Postman)
-// POST /api/register
-const bcrypt = require('bcrypt'); // لتشفير الباسورد قبل الحفظ
-
+// 2. كود التسجيل
 app.post('/api/register', async (req, res) => {
     const { 
         full_name, email, password, national_id, 
@@ -67,7 +66,6 @@ app.post('/api/register', async (req, res) => {
         address, face_signature 
     } = req.body;
 
-    // 1. Validation بناءً على التصميم (Figma) ورسالة الخطأ اللي ظهرتلك قبل كدة
     if (!email || !password || !national_id || !unit_name) {
         return res.status(400).json({
             "success": false,
@@ -76,10 +74,8 @@ app.post('/api/register', async (req, res) => {
     }
 
     try {
-        // 2. تشفير الباسورد (أمان)
         const hashedPassword = await bcrypt.hash(password, 10);
 
-        // 3. استنتاج الـ ID والـ Circle من جداول القانون (بناءً على صورة أسوان والبحيرة)
         const unitQuery = await pool.query(
             `SELECT au.administrative_id 
              FROM administrative_units au
@@ -94,7 +90,6 @@ app.post('/api/register', async (req, res) => {
 
         const admin_id = unitQuery.rows[0].administrative_id;
 
-        // 4. الحفظ في جدول الـ voters (بناءً على صورة الـ Schema Visualizer)
         const newUser = await pool.query(
             `INSERT INTO voters (
                 full_name, email, password_hash, national_id, 
@@ -103,7 +98,6 @@ app.post('/api/register', async (req, res) => {
             [full_name, email, hashedPassword, national_id, birth_date, unit_name, address, face_signature]
         );
 
-        // 5. الرد بنجاح (مطابق للـ Flow Chart خطوة رقم 2)
         res.status(201).json({
             "success": true,
             "voter_id": newUser.rows[0].voter_id,
@@ -111,27 +105,26 @@ app.post('/api/register', async (req, res) => {
         });
 
     } catch (err) {
-        if (err.code === '23505') { // Unique constraint error
+        if (err.code === '23505') {
             return res.status(400).json({ "success": false, "message": "الإيميل أو الرقم القومي مسجل بالفعل" });
         }
         console.error(err);
         res.status(500).json({ "success": false, "message": "خطأ داخلي في السيرفر" });
     }
 });
-// 3. كود تسجيل الدخول (الـ Login)
-// POST /api/login
-const bcrypt = require('bcrypt');
-const jwt = require('jsonwebtoken');
 
+// 3. كود تسجيل الدخول
 app.post('/api/login', async (req, res) => {
     const { email, password, face_features } = req.body;
 
     try {
-        // 1. البحث عن المستخدم في جدول voters (بناءً على الـ Schema Visualizer)
-        const userResult = await pool.query(
-            'SELECT * FROM voters WHERE email = $1', 
-            [email]
-        );
+        const userQuery = `
+            SELECT v.*, g.governorate_name 
+            FROM voters v
+            LEFT JOIN governorates g ON v.governorate_id = g.governorate_id
+            WHERE v.email = $1
+        `;
+        const userResult = await pool.query(userQuery, [email]);
 
         if (userResult.rows.length === 0) {
             return res.status(404).json({ "success": false, "message": "هذا الحساب غير موجود" });
@@ -139,14 +132,11 @@ app.post('/api/login', async (req, res) => {
 
         const user = userResult.rows[0];
 
-        // 2. التحقق: هل الدخول بالباسورد أم بالوجه؟
         if (password) {
             const isMatch = await bcrypt.compare(password, user.password_hash);
             if (!isMatch) return res.status(401).json({ "success": false, "message": "كلمة المرور غير صحيحة" });
         } 
         else if (face_features) {
-            // منطق الـ Face Matching (حساب المسافة بين المتجهات)
-            // نستخدم عامل التشابه في Postgres إذا كنت تستخدم pgvector
             const faceMatch = await pool.query(
                 'SELECT voter_id FROM voters WHERE voter_id = $1 AND face_signature <-> $2 < 0.1',
                 [user.voter_id, face_features]
@@ -154,32 +144,31 @@ app.post('/api/login', async (req, res) => {
             if (faceMatch.rows.length === 0) {
                 return res.status(401).json({ "success": false, "message": "لم يتم التعرف على الوجه" });
             }
-        } else {
-            return res.status(400).json({ "success": false, "message": "يجب إدخال كلمة المرور أو بصمة الوجه" });
         }
 
-        // 3. إنشاء Token للجلسة (JWT)
         const token = jwt.sign({ id: user.voter_id }, process.env.JWT_SECRET, { expiresIn: '1h' });
 
-        // 4. الرد ببيانات المستخدم كاملة (بناءً على حقول الـ Schema في الصورة)
         res.json({
             "success": true,
             "token": token,
             "user": {
                 "voter_id": user.voter_id,
                 "full_name": user.full_name,
+                "email": user.email,
                 "national_id": user.national_id,
-                "administrative_unit": user.administrative_unit, // الوحدة اللي استنتجناها في الـ Register
+                "governorate": user.governorate_name,
+                "administrative_unit": user.administrative_unit,
                 "has_voted": user.has_voted
             }
         });
 
     } catch (err) {
-        console.error(err);
-        res.status(500).json({ "success": false, "message": "خطأ في السيرفر" });
+        console.error("Login Error:", err);
+        res.status(500).json({ "success": false, "message": "خطأ داخلي في السيرفر" });
     }
 });
-// 4. كود جلب المحافظات (عشان الـ Dropdown في الفرونت)
+
+// 4. كود جلب المحافظات
 app.get('/api/governorates', async (req, res) => {
     try {
         const result = await pool.query('SELECT * FROM governorates ORDER BY governorate_id ASC');
