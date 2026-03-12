@@ -16,24 +16,14 @@ app.get('/', (req, res) => {
 
 // --- API التسجيل مع استنتاج المركز تلقائياً ---
 app.post('/api/register', async (req, res) => {
-    const { 
-        full_name, email, password, national_id, 
-        birth_date, governorate_name, address, face_signature 
-    } = req.body;
-
-    if (!email || !password || !national_id || !address || !governorate_name) {
-        return res.status(400).json({
-            "success": false,
-            "message": "بيانات ناقصة: تأكد من إدخال الإيميل، الباسورد، الرقم القومي، والمحافظة، والعنوان"
-        });
-    }
+    const { full_name, email, password, national_id, birth_date, governorate_name, address, face_signature } = req.body;
 
     try {
         const hashedPassword = await bcrypt.hash(password, 10);
 
-        // البحث عن المركز داخل نص العنوان
+        // 1. نجيب الـ ID بتاع المحافظة والمركز
         const unitQuery = await pool.query(
-            `SELECT au.administrative_id, au.unit_name 
+            `SELECT au.administrative_id, au.unit_name, g.governorate_id 
              FROM administrative_units au
              JOIN governorates g ON au.governorate_id = g.governorate_id
              WHERE $1 LIKE '%' || au.unit_name || '%' 
@@ -43,31 +33,25 @@ app.post('/api/register', async (req, res) => {
         );
 
         if (unitQuery.rows.length === 0) {
-            return res.status(400).json({ 
-                "success": false, 
-                "message": "عذراً، لم نستطع تحديد المركز من العنوان. اكتب اسم المركز بوضوح." 
-            });
+            return res.status(400).json({ "success": false, "message": "لم نتمكن من تحديد المركز من العنوان" });
         }
 
-        const detectedUnit = unitQuery.rows[0];
+        const { administrative_id, unit_name, governorate_id } = unitQuery.rows[0];
 
+        // 2. الـ INSERT الصحيح (تأكد من مطابقة أسماء الأعمدة لجدولك)
         const newUser = await pool.query(
             `INSERT INTO voters (
                 full_name, email, password_hash, national_id, 
-                date_of_birth, administrative_unit, address, face_signature
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING voter_id`,
-            [full_name, email, hashedPassword, national_id, birth_date, detectedUnit.unit_name, address, face_signature]
+                date_of_birth, administrative_unit, address, face_signature, governorate_id
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING voter_id`,
+            [full_name, email, hashedPassword, national_id, birth_date, unit_name, address, face_signature, governorate_id]
         );
 
-        res.status(201).json({
-            "success": true,
-            "detected_unit": detectedUnit.unit_name,
-            "message": "تم التسجيل بنجاح وتحديد دائرتك الانتخابية تلقائياً"
-        });
+        res.status(201).json({ "success": true, "voter_id": newUser.rows[0].voter_id });
 
     } catch (err) {
-        console.error(err);
-        res.status(500).json({ "success": false, "message": "خطأ داخلي في السيرفر" });
+        console.error("DETAILED ERROR:", err.message); // ده هيظهرلك في Render Logs
+        res.status(500).json({ "success": false, "message": "خطأ في الداتابيز: " + err.message });
     }
 });
 
