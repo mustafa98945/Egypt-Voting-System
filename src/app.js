@@ -18,27 +18,41 @@ app.get('/', (req, res) => {
 app.post('/api/register', async (req, res) => {
     const { full_name, email, password, national_id, birth_date, governorate_name, address, face_signature } = req.body;
 
+    // التأكد من وجود البيانات الأساسية
+    if (!email || !password || !national_id || !address || !governorate_name) {
+        return res.status(400).json({
+            "success": false,
+            "message": "بيانات ناقصة: تأكد من إرسال الإيميل، الباسورد، الرقم القومي، المحافظة، والعنوان"
+        });
+    }
+
     try {
         const hashedPassword = await bcrypt.hash(password, 10);
 
-        // 1. نجيب الـ ID بتاع المحافظة والمركز
+        // 1. البحث الذكي عن المركز (مرن جداً لتجنب خطأ لم نتمكن من تحديد المركز)
         const unitQuery = await pool.query(
             `SELECT au.administrative_id, au.unit_name, g.governorate_id 
              FROM administrative_units au
              JOIN governorates g ON au.governorate_id = g.governorate_id
-             WHERE $1 LIKE '%' || au.unit_name || '%' 
+             WHERE (
+                $1 LIKE '%' || au.unit_name || '%'  -- هل اسم المركز موجود جوه نص العنوان؟
+                OR au.unit_name LIKE '%' || $1 || '%' -- هل نص العنوان فيه كلمة تطابق اسم المركز؟
+             )
              AND g.governorate_name = $2 
              LIMIT 1`,
             [address, governorate_name]
         );
 
         if (unitQuery.rows.length === 0) {
-            return res.status(400).json({ "success": false, "message": "لم نتمكن من تحديد المركز من العنوان" });
+            return res.status(400).json({ 
+                "success": false, 
+                "message": "لم نتمكن من تحديد المركز من العنوان. يرجى كتابة اسم المركز/القسم بوضوح (مثال: مركز الدلنجات)" 
+            });
         }
 
-        const { administrative_id, unit_name, governorate_id } = unitQuery.rows[0];
+        const { unit_name, governorate_id } = unitQuery.rows[0];
 
-        // 2. الـ INSERT الصحيح (تأكد من مطابقة أسماء الأعمدة لجدولك)
+        // 2. الحفظ في جدول الناخبين
         const newUser = await pool.query(
             `INSERT INTO voters (
                 full_name, email, password_hash, national_id, 
@@ -47,10 +61,14 @@ app.post('/api/register', async (req, res) => {
             [full_name, email, hashedPassword, national_id, birth_date, unit_name, address, face_signature, governorate_id]
         );
 
-        res.status(201).json({ "success": true, "voter_id": newUser.rows[0].voter_id });
+        res.status(201).json({ 
+            "success": true, 
+            "voter_id": newUser.rows[0].voter_id,
+            "detected_unit": unit_name 
+        });
 
     } catch (err) {
-        console.error("DETAILED ERROR:", err.message); // ده هيظهرلك في Render Logs
+        console.error("DETAILED ERROR:", err.message);
         res.status(500).json({ "success": false, "message": "خطأ في الداتابيز: " + err.message });
     }
 });
