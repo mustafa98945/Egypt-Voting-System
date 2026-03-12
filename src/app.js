@@ -125,19 +125,26 @@ app.get('/api/governorates', async (req, res) => {
     }
 });
 
-// --- API جلب المراكز بناءً على المحافظة ---
-app.get('/api/units/:govId', async (req, res) => {
-    const { govId } = req.params;
+// --- API جلب المحافظات ---
+app.get('/api/governorates', async (req, res) => {
+    console.log("Request received for /api/governorates"); // هتعرف من الـ Logs إن الطلب وصل فعلاً
     try {
-        const result = await pool.query(
-            'SELECT * FROM administrative_units WHERE governorate_id = $1 ORDER BY unit_name ASC',
-            [govId]
-        );
-        res.json({ "success": true, "data": result.rows });
+        const result = await pool.query('SELECT * FROM governorates ORDER BY governorate_name ASC');
+        console.log("Data fetched from DB:", result.rows.length, "rows found");
+        
+        // حتى لو الجدول فاضي، هيرجع مصفوفة فاضية مش 404
+        res.status(200).json({ 
+            "success": true, 
+            "count": result.rows.length,
+            "data": result.rows 
+        });
     } catch (err) {
-        res.status(500).json({ "success": false, "message": "خطأ في جلب المراكز" });
+        console.error("DATABASE ERROR:", err.message);
+        res.status(500).json({ 
+            "success": false, 
+            "message": "خطأ في الداتابيز: " + err.message 
+        });
     }
 });
-// Last updated: 2026-03-13
 
 app.listen(process.env.PORT || 3000, () => console.log('Server is running!'));
