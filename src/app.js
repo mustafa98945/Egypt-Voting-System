@@ -57,90 +57,83 @@ app.get('/', (req, res) => {
 });
 
 // 2. كود التسجيل (اللي نجح معاك في Postman)
+// POST: /api/register
 app.post('/api/register', async (req, res) => {
     try {
-        const { fullName, email, password, nationalId, dob, address, govName } = req.body;
+        // سحب البيانات مع وضع قيم افتراضية لو حاجة مش موجودة عشان ميديناش Error
+        const { 
+            fullName, email, password, nationalId, 
+            dob = null, address = '', govName, 
+            face_encoding = null 
+        } = req.body;
 
-        // 1. جلب الـ ID الخاص بالمحافظة للتأكد من وجودها
-        const govResult = await pool.query(
-            'SELECT governorate_id FROM governorates WHERE governorate_name = $1', 
-            [govName]
-        );
-
-        if (govResult.rows.length === 0) {
-            return res.status(400).json({ success: false, message: "Governorate name not found" });
+        // 1. التأكد من البيانات الأساسية اللي مينفعش تسجل من غيرها
+        if (!fullName || !email || !password || !govName) {
+            return res.status(400).json({ 
+                success: false, 
+                message: "بيانات ناقصة: تأكد من إرسال الاسم والإيميل والباسورد والمحافظة" 
+            });
         }
 
+        // 2. فحص بصمة الوش (لو مبعوتة)
+        if (face_encoding) {
+            const faceCheck = await pool.query('SELECT voter_id FROM voters WHERE face_signature = $1', [face_encoding]);
+            if (faceCheck.rows.length > 0) {
+                return res.status(400).json({ success: false, message: "هذا الوجه مسجل بالفعل بحساب آخر" });
+            }
+        }
+
+        // 3. جلب ID المحافظة
+        const govResult = await pool.query('SELECT governorate_id FROM governorates WHERE governorate_name = $1', [govName]);
+        if (govResult.rows.length === 0) {
+            return res.status(400).json({ success: false, message: "المحافظة التي اخترتها غير موجودة" });
+        }
         const govId = govResult.rows[0].governorate_id;
 
-        // 2. جلب المناطق المتاحة للمطابقة
-        const units = await pool.query(
-            'SELECT unit_name FROM administrative_units WHERE governorate_id = $1', 
-            [govId]
-        );
-
-        // 3. البحث عن تطابق المنطقة (Smart Match)
-        const matched = units.rows.find(u => 
-            address.includes(u.unit_name.replace(/مركز|قسم|حي|مدينة/g, '').trim())
-        );
-        const finalUnit = matched ? matched.unit_name : "Not Determined";
-
-        // 4. الحفظ في الداتابيز
+        // 4. الحفظ النهائي (استخدام VALUES آمنة)
         const query = `
             INSERT INTO voters 
-            (full_name, email, password_hash, national_id, date_of_birth, address, governorate_id, administrative_unit) 
+            (full_name, email, password_hash, national_id, date_of_birth, address, governorate_id, face_signature) 
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
         `;
         
-        await pool.query(query, [fullName, email, password, nationalId, dob, address, govId, finalUnit]);
+        await pool.query(query, [fullName, email, password, nationalId, dob, address, govId, face_encoding]);
 
-        // 5. النتيجة النهائية بالأسماء مش الأرقام
-        res.json({ 
-            success: true, 
-            message: "Registered Successfully", 
-            govName: govName, // رجعنا الاسم بدل الـ ID
-            savedUnit: finalUnit 
-        });
+        res.json({ success: true, message: "تم تسجيل الحساب وبصمة الوجه الوهمية بنجاح!" });
 
-    } catch (e) { 
-        res.status(500).json({ error: e.message }); 
+    } catch (e) {
+        console.error("Registration Error:", e.message);
+        res.status(500).json({ error: "خطأ في السيرفر: " + e.message });
     }
 });
 
-
 // 3. كود تسجيل الدخول (الـ Login)
+// POST: /api/login
 app.post('/api/login', async (req, res) => {
     try {
-        const { nationalId, password } = req.body;
+        const { email, password } = req.body;
         
-        // استخدام JOIN لجلب اسم المحافظة بدل الـ ID
         const query = `
             SELECT 
-                v.voter_id, 
-                v.full_name, 
-                v.email, 
-                v.national_id, 
-                g.governorate_name AS govName, -- هنا جبنا الاسم
-                v.administrative_unit AS savedUnit, 
-                v.has_voted 
+                v.voter_id, v.full_name, v.email, v.national_id, 
+                g.governorate_name AS govname, v.administrative_unit, v.has_voted
             FROM voters v
             JOIN governorates g ON v.governorate_id = g.governorate_id
-            WHERE v.national_id = $1 AND v.password_hash = $2
+            WHERE v.email = $1 AND v.password_hash = $2
         `;
         
-        const result = await pool.query(query, [nationalId, password]);
+        const result = await pool.query(query, [email, password]);
 
         if (result.rows.length > 0) {
             res.json({ 
                 success: true, 
-                message: "Login Successful", 
-                user: result.rows[0] 
+                user: result.rows[0] // هيرجع الاسم، المحافظة، وحالة التصويت
             });
         } else {
-            res.status(401).json({ success: false, message: "Invalid National ID or Password" });
+            res.status(401).json({ success: false, message: "الإيميل أو كلمة السر خطأ" });
         }
-    } catch (e) { 
-        res.status(500).json({ error: e.message }); 
+    } catch (e) {
+        res.status(500).json({ error: e.message });
     }
 });
 // 4. كود جلب المحافظات (عشان الـ Dropdown في الفرونت)
