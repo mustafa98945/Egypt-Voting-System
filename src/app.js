@@ -57,74 +57,126 @@ app.get('/', (req, res) => {
 });
 
 // 2. كود التسجيل (اللي نجح معاك في Postman)
-// POST: /api/register
 // POST /api/register
+const bcrypt = require('bcrypt'); // لتشفير الباسورد قبل الحفظ
+
 app.post('/api/register', async (req, res) => {
-    const { national_id, full_name, birth_date, gender, address, governorate_name, unit_name } = req.body;
+    const { 
+        full_name, email, password, national_id, 
+        birth_date, governorate_name, unit_name, 
+        address, face_signature 
+    } = req.body;
+
+    // 1. Validation بناءً على التصميم (Figma) ورسالة الخطأ اللي ظهرتلك قبل كدة
+    if (!email || !password || !national_id || !unit_name) {
+        return res.status(400).json({
+            "success": false,
+            "message": "بيانات ناقصة: تأكد من إدخال الإيميل، الباسورد، الرقم القومي، والوحدة الإدارية"
+        });
+    }
 
     try {
-        // 1. نجيب الـ ID بتاع الوحدة الإدارية والمحافظة بناءً على الأسماء اللي بعتها
-        const query = `
-    SELECT au.administrative_id 
-    FROM administrative_units au
-    JOIN governorates g ON au.governorate_id = g.governorate_id
-    WHERE TRIM(au.unit_name) = $1 
-    AND TRIM(g.governorate_name) = $2
-`;
+        // 2. تشفير الباسورد (أمان)
+        const hashedPassword = await bcrypt.hash(password, 10);
+
+        // 3. استنتاج الـ ID والـ Circle من جداول القانون (بناءً على صورة أسوان والبحيرة)
+        const unitQuery = await pool.query(
+            `SELECT au.administrative_id 
+             FROM administrative_units au
+             JOIN governorates g ON au.governorate_id = g.governorate_id
+             WHERE au.unit_name = $1 AND g.governorate_name = $2`,
+            [unit_name, governorate_name]
+        );
 
         if (unitQuery.rows.length === 0) {
-            return res.status(400).json({ error: "الوحدة الإدارية أو المحافظة غير صحيحة" });
+            return res.status(400).json({ "success": false, "message": "لم يتم العثور على الدائرة الانتخابية" });
         }
 
         const admin_id = unitQuery.rows[0].administrative_id;
 
-        // 2. نسجل الناخب في جدول الـ voters
-        const newVoter = await pool.query(
-            `INSERT INTO voters (national_id, full_name, birth_date, gender, address, administrative_id)
-             VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
-            [national_id, full_name, birth_date, gender, address, admin_id]
+        // 4. الحفظ في جدول الـ voters (بناءً على صورة الـ Schema Visualizer)
+        const newUser = await pool.query(
+            `INSERT INTO voters (
+                full_name, email, password_hash, national_id, 
+                date_of_birth, administrative_unit, address, face_signature
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING voter_id`,
+            [full_name, email, hashedPassword, national_id, birth_date, unit_name, address, face_signature]
         );
 
-        res.status(201).json({ message: "تم التسجيل بنجاح", voter: newVoter.rows[0] });
+        // 5. الرد بنجاح (مطابق للـ Flow Chart خطوة رقم 2)
+        res.status(201).json({
+            "success": true,
+            "voter_id": newUser.rows[0].voter_id,
+            "message": "تم إنشاء الحساب بنجاح وتحديد الدائرة الانتخابية"
+        });
 
     } catch (err) {
-        console.error(err.message);
-        res.status(500).send("خطأ في السيرفر");
+        if (err.code === '23505') { // Unique constraint error
+            return res.status(400).json({ "success": false, "message": "الإيميل أو الرقم القومي مسجل بالفعل" });
+        }
+        console.error(err);
+        res.status(500).json({ "success": false, "message": "خطأ داخلي في السيرفر" });
     }
 });
-
 // 3. كود تسجيل الدخول (الـ Login)
-// POST: /api/login
 // POST /api/login
+const bcrypt = require('bcrypt');
+const jwt = require('jsonwebtoken');
+
 app.post('/api/login', async (req, res) => {
-    const { national_id } = req.body;
+    const { email, password, face_features } = req.body;
 
     try {
-        const voterData = await pool.query(
-            `SELECT 
-                v.national_id, 
-                v.full_name, 
-                v.address, 
-                g.governorate_name AS governorate,
-                au.unit_name AS administrative_unit,
-                au.parent_circle AS electoral_circle
-             FROM voters v
-             JOIN administrative_units au ON v.administrative_id = au.administrative_id
-             JOIN governorates g ON au.governorate_id = g.governorate_id
-             WHERE v.national_id = $1`,
-            [national_id]
+        // 1. البحث عن المستخدم في جدول voters (بناءً على الـ Schema Visualizer)
+        const userResult = await pool.query(
+            'SELECT * FROM voters WHERE email = $1', 
+            [email]
         );
 
-        if (voterData.rows.length === 0) {
-            return res.status(404).json({ message: "هذا الرقم القومي غير مسجل" });
+        if (userResult.rows.length === 0) {
+            return res.status(404).json({ "success": false, "message": "هذا الحساب غير موجود" });
         }
 
-        // إرسال البيانات كاملة للموبايل أو الويب
-        res.json(voterData.rows[0]);
+        const user = userResult.rows[0];
+
+        // 2. التحقق: هل الدخول بالباسورد أم بالوجه؟
+        if (password) {
+            const isMatch = await bcrypt.compare(password, user.password_hash);
+            if (!isMatch) return res.status(401).json({ "success": false, "message": "كلمة المرور غير صحيحة" });
+        } 
+        else if (face_features) {
+            // منطق الـ Face Matching (حساب المسافة بين المتجهات)
+            // نستخدم عامل التشابه في Postgres إذا كنت تستخدم pgvector
+            const faceMatch = await pool.query(
+                'SELECT voter_id FROM voters WHERE voter_id = $1 AND face_signature <-> $2 < 0.1',
+                [user.voter_id, face_features]
+            );
+            if (faceMatch.rows.length === 0) {
+                return res.status(401).json({ "success": false, "message": "لم يتم التعرف على الوجه" });
+            }
+        } else {
+            return res.status(400).json({ "success": false, "message": "يجب إدخال كلمة المرور أو بصمة الوجه" });
+        }
+
+        // 3. إنشاء Token للجلسة (JWT)
+        const token = jwt.sign({ id: user.voter_id }, process.env.JWT_SECRET, { expiresIn: '1h' });
+
+        // 4. الرد ببيانات المستخدم كاملة (بناءً على حقول الـ Schema في الصورة)
+        res.json({
+            "success": true,
+            "token": token,
+            "user": {
+                "voter_id": user.voter_id,
+                "full_name": user.full_name,
+                "national_id": user.national_id,
+                "administrative_unit": user.administrative_unit, // الوحدة اللي استنتجناها في الـ Register
+                "has_voted": user.has_voted
+            }
+        });
 
     } catch (err) {
-        console.error(err.message);
-        res.status(500).send("خطأ في السيرفر");
+        console.error(err);
+        res.status(500).json({ "success": false, "message": "خطأ في السيرفر" });
     }
 });
 // 4. كود جلب المحافظات (عشان الـ Dropdown في الفرونت)
