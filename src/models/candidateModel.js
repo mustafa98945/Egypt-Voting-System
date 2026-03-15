@@ -1,8 +1,8 @@
 const pool = require('../config/db');
 
 class Candidate {
+    // 1. تسجيل مرشح جديد (اللي إنت كاتبه وشغال تمام)
     static async create(data) {
-        // 1. لوجيك حساب السن أوتوماتيك (مش بنخزنه، بنحسبه ونرجعه للـ Response)
         const birthDate = new Date(data.birth_date);
         const today = new Date();
         let age = today.getFullYear() - birthDate.getFullYear();
@@ -11,7 +11,6 @@ class Candidate {
             age--;
         }
 
-        // 2. جملة الـ SQL شاملة الـ Election Symbol وباقي الـ 10 صور
         const queryText = `
             INSERT INTO candidates (
                 national_id, email, password, phone_numbers, short_bio, 
@@ -26,36 +25,32 @@ class Candidate {
             ) RETURNING *`;
 
         const values = [
-            data.national_id, 
-            data.email, 
-            data.password, 
-            data.phone_numbers, // المصفوفة اللي حدها 3
-            data.short_bio,
-            data.candidate_type, 
-            data.occupation, 
-            data.degree,
-            data.birth_date, 
-            data.expiry_date,
-            // الـ 10 صور ومن ضمنهم الـ Symbol في الآخر
-            data.national_id_card_url, 
-            data.education_url, 
-            data.military_service_url,
-            data.financial_disclosure_url, 
-            data.personal_photos_url, 
-            data.birth_certificate_url,
-            data.fitness_health_url, 
-            data.criminal_record_url, 
-            data.deposit_receipt_url, 
+            data.national_id, data.email, data.password, data.phone_numbers, data.short_bio,
+            data.candidate_type, data.occupation, data.degree, data.birth_date, data.expiry_date,
+            data.national_id_card_url, data.education_url, data.military_service_url,
+            data.financial_disclosure_url, data.personal_photos_url, data.birth_certificate_url,
+            data.fitness_health_url, data.criminal_record_url, data.deposit_receipt_url, 
             data.election_symbol_url 
         ];
 
         const result = await pool.query(queryText, values);
         
-        // بنرجع البيانات ومعاها السن المحسوب عشان الفلاتر يعرضه
         return {
             ...result.rows[0],
             calculated_age: age
         };
+    }
+
+    // 2. البحث عن مرشح بالإيميل (عشان الـ Login العادي)
+    static async findByEmail(email) {
+        const result = await pool.query("SELECT * FROM candidates WHERE email = $1", [email]);
+        return result.rows[0];
+    }
+
+    // 3. البحث عن مرشح بالرقم القومي (عشان بصمة الوجه)
+    static async findByNationalId(national_id) {
+        const result = await pool.query("SELECT * FROM candidates WHERE national_id = $1", [national_id]);
+        return result.rows[0];
     }
 }
 
