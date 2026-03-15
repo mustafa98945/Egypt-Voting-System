@@ -149,10 +149,12 @@ app.post('/api/login', async (req, res) => {
             return res.status(400).json({ success: false, message: "برجاء إدخال بيانات الدخول" });
         }
 
+        // إرسال الرد بالبيانات كاملة شاملة الـ ID الجديد
         res.json({
             success: true,
             message: `أهلاً بك يا ${user.full_name}`,
             user_data: {
+                voter_id: user.voter_id, // هنا هيرجع 1، 2، 3...
                 full_name: user.full_name,
                 national_id: user.national_id,
                 email: user.email,
@@ -164,11 +166,10 @@ app.post('/api/login', async (req, res) => {
         });
 
     } catch (err) {
+        console.error(err.message);
         res.status(500).json({ success: false, message: "حدث خطأ في السيرفر" });
     }
 });
-
-// --- 4. API المحافظات ---
 app.get('/api/governorates', async (req, res) => {
     try {
         const result = await pool.query('SELECT * FROM governorates ORDER BY governorate_name ASC');
