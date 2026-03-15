@@ -9,7 +9,7 @@ const app = express();
 app.use(cors()); 
 app.use(express.json());
 
-// --- الصفحة الرئيسية الاحترافية ---
+// --- الصفحة الرئيسية ---
 app.get('/', (req, res) => {
     res.send(`
     <!DOCTYPE html>
@@ -36,16 +36,15 @@ app.get('/', (req, res) => {
     `);
 });
 
-// --- 1. API التحقق من السجل المدني (أول خطوة في الأبلكيشن) ---
+// --- 1. API التحقق من السجل المدني ---
 app.post('/api/verify-civil-id', async (req, res) => {
     const { national_id, birth_date, expiry_date } = req.body;
 
     if (!national_id || !birth_date || !expiry_date) {
-        return res.status(400).json({ success: false, message: "برجاء إدخال الرقم القومي وتاريخ الميلاد وتاريخ انتهاء البطاقة" });
+        return res.status(400).json({ success: false, message: "حدث خطأ في البيانات المدخلة" });
     }
 
     try {
-        // البحث في جدول السجل المدني اللي عملناه
         const citizenQuery = await pool.query(
             `SELECT full_name, governorate_name, unit_name, address_details 
              FROM civil_registry 
@@ -54,13 +53,9 @@ app.post('/api/verify-civil-id', async (req, res) => {
         );
 
         if (citizenQuery.rows.length === 0) {
-            return res.status(401).json({ 
-                success: false, 
-                message: "البيانات غير متطابقة مع السجل المدني. تأكد من صحة البيانات على البطاقة." 
-            });
+            return res.status(401).json({ success: false, message: "حدث خطأ في البيانات المدخلة، يرجى المراجعة" });
         }
 
-        // إرسال البيانات للأبلكيشن عشان يعرضها للمستخدم للتأكيد
         res.json({ 
             success: true, 
             message: "تم التحقق من الهوية بنجاح",
@@ -68,24 +63,22 @@ app.post('/api/verify-civil-id', async (req, res) => {
         });
 
     } catch (err) {
-        res.status(500).json({ success: false, message: "خطأ في السيرفر: " + err.message });
+        res.status(500).json({ success: false, message: "حدث خطأ في السيرفر" });
     }
 });
 
-// --- 2. API تسجيل الحساب النهائي (بعد التأكد من الهوية والوجه) ---
+// --- 2. API تسجيل الحساب النهائي ---
 app.post('/api/register', async (req, res) => {
     const { 
-        national_id, birth_date, expiry_date, // بيانات السجل
-        email, password, confirm_password     // بيانات الحساب
+        national_id, birth_date, expiry_date, 
+        email, password, confirm_password 
     } = req.body;
 
-    // 1. التأكد إن الباسورد متطابق (زيادة أمان في الـ Back-end)
     if (password !== confirm_password) {
-        return res.status(400).json({ success: false, message: "كلمة المرور غير متطابقة" });
+        return res.status(400).json({ success: false, message: "حدث خطأ في البيانات المدخلة" });
     }
 
     try {
-        // 2. التحقق من السجل المدني أولاً
         const citizen = await pool.query(
             `SELECT full_name FROM civil_registry 
              WHERE national_id = $1 AND birth_date = $2 AND expiry_date = $3`,
@@ -93,84 +86,69 @@ app.post('/api/register', async (req, res) => {
         );
 
         if (citizen.rows.length === 0) {
-            return res.status(401).json({ success: false, message: "بيانات البطاقة غير صحيحة أو غير مسجلة" });
+            return res.status(401).json({ success: false, message: "حدث خطأ في البيانات المدخلة، يرجى المراجعة" });
         }
 
-        // 3. لو البيانات صح، نشفر الباسورد ونحفظ الحساب
         const hashedPassword = await bcrypt.hash(password, 10);
         await pool.query(
             `INSERT INTO voters (national_id, email, password) VALUES ($1, $2, $3)`,
             [national_id, email, hashedPassword]
         );
 
-        res.status(201).json({ 
-            success: true, 
-            message: `تم التحقق من بياناتك يا ${citizen.rows[0].full_name} وإنشاء حسابك بنجاح` 
-        });
+        res.status(201).json({ success: true, message: "تم التحقق من هويتك وإنشاء حسابك بنجاح" });
 
     } catch (err) {
-        if (err.code === '23505') return res.status(400).json({ success: false, message: "هذا الحساب مسجل مسبقاً" });
-        res.status(500).json({ success: false, message: err.message });
+        if (err.code === '23505') {
+            return res.status(400).json({ success: false, message: "حدث خطأ في عملية التسجيل" });
+        }
+        res.status(500).json({ success: false, message: "حدث خطأ في السيرفر" });
     }
 });
 
 // --- 3. API تسجيل الدخول (Login) ---
 app.post('/api/login', async (req, res) => {
-    // بنستقبل إما الإيميل والباسورد أو الرقم القومي (لو جاي من سيستم الوش)
     const { email, password, national_id_from_face } = req.body;
 
     try {
         let user;
 
-        // --- الحالة الأولى: الدخول عن طريق بصمة الوجه (زميلك بعت National ID) ---
+        // الحالة الأولى: بصمة الوجه (من زميلك)
         if (national_id_from_face) {
-            console.log("Login attempt via Face Recognition for ID:", national_id_from_face);
-            
             const result = await pool.query(
                 `SELECT v.*, c.full_name, c.governorate_name, c.unit_name, c.address_details
                  FROM voters v 
                  JOIN civil_registry c ON v.national_id = c.national_id
-                 WHERE v.national_id = $1`, 
-                [national_id_from_face]
+                 WHERE v.national_id = $1`, [national_id_from_face]
             );
-            
             user = result.rows[0];
             
             if (!user) {
-                return res.status(404).json({ 
-                    success: false, 
-                    message: "الوجه معترف به، ولكن هذا الرقم القومي غير مسجل في منظومة الانتخابات." 
-                });
+                return res.status(401).json({ success: false, message: "حدث خطأ في عملية تسجيل الدخول" });
             }
         } 
-        
-        // --- الحالة الثانية: الدخول العادي (إيميل وباسورد) ---
+        // الحالة الثانية: إيميل وباسورد
         else if (email && password) {
             const result = await pool.query(
                 `SELECT v.*, c.full_name, c.governorate_name, c.unit_name, c.address_details
                  FROM voters v 
                  JOIN civil_registry c ON v.national_id = c.national_id
-                 WHERE v.email = $1`, 
-                [email]
+                 WHERE v.email = $1`, [email]
             );
-            
             user = result.rows[0];
 
             if (!user) {
-                return res.status(404).json({ success: false, message: "الحساب غير موجود" });
+                return res.status(401).json({ success: false, message: "بيانات الدخول غير صحيحة" });
             }
 
-            // التأكد من الباسورد
             const isMatch = await bcrypt.compare(password, user.password);
-            if (!isMatch) return res.status(401).json({ success: false, message: "كلمة المرور خطأ" });
+            if (!isMatch) {
+                return res.status(401).json({ success: false, message: "بيانات الدخول غير صحيحة" });
+            }
         } 
-        
-        // لو مبعتش لا ده ولا ده
         else {
             return res.status(400).json({ success: false, message: "برجاء إدخال بيانات الدخول" });
         }
 
-        // --- النتيجة النهائية (نجاح الدخول في الحالتين) ---
         res.json({
             success: true,
             message: `أهلاً بك يا ${user.full_name}`,
@@ -186,17 +164,17 @@ app.post('/api/login', async (req, res) => {
         });
 
     } catch (err) {
-        console.error(err.message);
-        res.status(500).json({ success: false, message: "خطأ في السيرفر" });
+        res.status(500).json({ success: false, message: "حدث خطأ في السيرفر" });
     }
 });
-// --- 4. API المحافظات (للعرض في الاختيارات لو احتاجت) ---
+
+// --- 4. API المحافظات ---
 app.get('/api/governorates', async (req, res) => {
     try {
         const result = await pool.query('SELECT * FROM governorates ORDER BY governorate_name ASC');
         res.json({ success: true, data: result.rows });
     } catch (err) {
-        res.status(500).json({ success: false, message: "خطأ في الداتابيز" });
+        res.status(500).json({ success: false, message: "حدث خطأ في الداتابيز" });
     }
 });
 
