@@ -2,8 +2,8 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 
-const voterRoutes = require('./src/routes/voterRoutes');
-const candidateRoutes = require('./src/routes/candidateRoutes');
+const voterRoutes = require('./routes/voterRoutes');
+const candidateRoutes = require('./routes/candidateRoutes');
 
 const app = express();
 app.use(cors());
