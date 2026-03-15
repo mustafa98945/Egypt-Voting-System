@@ -1,7 +1,7 @@
 const pool = require('../config/db');
 
 class Candidate {
-    // 1. تسجيل مرشح جديد (اللي إنت كاتبه وشغال تمام)
+    // 1. تسجيل مرشح جديد (كودك شغال تمام)
     static async create(data) {
         const birthDate = new Date(data.birth_date);
         const today = new Date();
@@ -41,15 +41,25 @@ class Candidate {
         };
     }
 
-    // 2. البحث عن مرشح بالإيميل (عشان الـ Login العادي)
+    // 2. البحث بالإيميل مع JOIN لجلب الاسم والبيانات الشخصية
     static async findByEmail(email) {
-        const result = await pool.query("SELECT * FROM candidates WHERE email = $1", [email]);
+        const result = await pool.query(
+            `SELECT c.*, cr.full_name, cr.governorate_name, cr.unit_name 
+             FROM candidates c
+             JOIN civil_registry cr ON c.national_id = cr.national_id
+             WHERE c.email = $1`, [email]
+        );
         return result.rows[0];
     }
 
-    // 3. البحث عن مرشح بالرقم القومي (عشان بصمة الوجه)
+    // 3. البحث بالرقم القومي مع JOIN لجلب الاسم والبيانات الشخصية
     static async findByNationalId(national_id) {
-        const result = await pool.query("SELECT * FROM candidates WHERE national_id = $1", [national_id]);
+        const result = await pool.query(
+            `SELECT c.*, cr.full_name, cr.governorate_name, cr.unit_name 
+             FROM candidates c
+             JOIN civil_registry cr ON c.national_id = cr.national_id
+             WHERE c.national_id = $1`, [national_id]
+        );
         return result.rows[0];
     }
 }

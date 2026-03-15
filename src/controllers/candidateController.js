@@ -57,41 +57,32 @@ exports.loginCandidate = async (req, res) => {
 
     try {
         let candidate;
-
-        // الحالة أ: دخول ببصمة الوجه (National ID مبعوث)
         if (national_id) {
             candidate = await Candidate.findByNationalId(national_id);
-            if (!candidate) {
-                return res.status(404).json({ success: false, message: "لم يتم التعرف على الوجه، الرقم القومي غير مسجل" });
-            }
-            return res.status(200).json({ 
-                success: true, 
-                message: "تم التعرف على الوجه بنجاح (Smart Login)", 
-                data: candidate 
-            });
-        }
-
-        // الحالة ب: دخول بالبريد والباسورد (Email مبعوث)
-        if (email && password) {
+            if (!candidate) return res.status(404).json({ success: false, message: "المرشح غير موجود بالسجلات" });
+        } else if (email && password) {
             candidate = await Candidate.findByEmail(email);
-            if (!candidate) {
-                return res.status(404).json({ success: false, message: "البريد الإلكتروني غير موجود" });
-            }
-
+            if (!candidate) return res.status(404).json({ success: false, message: "البريد الإلكتروني غير صحيح" });
+            
             const isMatch = await bcrypt.compare(password, candidate.password);
-            if (!isMatch) {
-                return res.status(401).json({ success: false, message: "كلمة المرور غير صحيحة" });
-            }
-
-            return res.status(200).json({ 
-                success: true, 
-                message: "تم تسجيل الدخول بالبريد بنجاح (Smart Login)", 
-                data: candidate 
-            });
+            if (!isMatch) return res.status(401).json({ success: false, message: "كلمة المرور غير صحيحة" });
+        } else {
+            return res.status(400).json({ success: false, message: "يرجى إرسال بيانات الدخول" });
         }
 
-        // لو مبعتش حاجة خالص
-        return res.status(400).json({ success: false, message: "يرجى إرسال بيانات الدخول (بريد وباسورد أو رقم قومي)" });
+        // الـ Response المخصص اللي إنت طلبته
+        res.status(200).json({
+            success: true,
+            message: `أهلاً بك يا ${candidate.full_name}`,
+            user_data: {
+                candidate_id: candidate.candidate_id,
+                full_name: candidate.full_name,
+                governorate: candidate.governorate_name,
+                unit: candidate.unit_name,
+                election_symbol: candidate.election_symbol_url,
+                has_voted: candidate.has_voted || false // لو لسه مضافش العمود ده في الداتابيز
+            }
+        });
 
     } catch (err) {
         console.error(err.message);
