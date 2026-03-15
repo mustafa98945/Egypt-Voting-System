@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
-const voterController = require('../controllers/voterController');
+// ✅ ضيف حرف الـ s عشان يطابق اسم الملف في الفولدر عندك
+const voterController = require('../controllers/voterControllers'); 
 
 router.post('/verify', voterController.verifyBeforeRegister);
 router.post('/register', voterController.registerVoter);
