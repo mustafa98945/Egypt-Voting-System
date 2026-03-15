@@ -158,11 +158,8 @@ app.post('/api/login', async (req, res) => {
             user_data: {
                 voter_id: user.voter_id, // هنا هيرجع 1، 2، 3...
                 full_name: user.full_name,
-                national_id: user.national_id,
-                email: user.email,
                 governorate: user.governorate_name,
                 unit: user.unit_name,
-                address: user.address_details,
                 has_voted: user.has_voted
             }
         });
