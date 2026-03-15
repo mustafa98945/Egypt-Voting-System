@@ -71,7 +71,8 @@ app.post('/api/verify-before-register', async (req, res) => {
 app.post('/api/register', async (req, res) => {
     const { 
         national_id, birth_date, expiry_date, 
-        email, password, confirm_password 
+        email, password, confirm_password,
+        party_card_url // الحقل الجديد اللي جاي من الـ Flutter (اختياري)
     } = req.body;
 
     if (password !== confirm_password) {
@@ -79,7 +80,7 @@ app.post('/api/register', async (req, res) => {
     }
 
     try {
-        // التحقق من السجل المدني للمرة الأخيرة لضمان الأمان
+        // 1. التحقق من السجل المدني
         const citizen = await pool.query(
             `SELECT national_id FROM civil_registry 
              WHERE national_id = $1 AND birth_date = $2 AND expiry_date = $3`,
@@ -92,9 +93,12 @@ app.post('/api/register', async (req, res) => {
 
         const hashedPassword = await bcrypt.hash(password, 10);
         
+        // 2. إدخال البيانات في جدول الناخبين
+        // استخدمنا || null عشان لو party_card_url مش مبعوت أصلاً ينزل في الجدول NULL
         await pool.query(
-            `INSERT INTO voters (national_id, email, password) VALUES ($1, $2, $3)`,
-            [national_id, email, hashedPassword]
+            `INSERT INTO voters (national_id, email, password, party_card_url) 
+             VALUES ($1, $2, $3, $4)`,
+            [national_id, email, hashedPassword, party_card_url || null]
         );
 
         res.status(201).json({ success: true, message: "تم إنشاء حسابك بنجاح" });
@@ -103,10 +107,10 @@ app.post('/api/register', async (req, res) => {
         if (err.code === '23505') {
             return res.status(400).json({ success: false, message: "حدث خطأ في عملية التسجيل" });
         }
+        console.error(err.message);
         res.status(500).json({ success: false, message: "حدث خطأ في السيرفر" });
     }
 });
-
 // --- 3. API تسجيل الدخول (Login) ---
 app.post('/api/login', async (req, res) => {
     const { email, password, national_id_from_face } = req.body;
