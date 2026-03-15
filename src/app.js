@@ -37,29 +37,29 @@ app.get('/', (req, res) => {
 });
 
 // --- 1. API التحقق من السجل المدني ---
-app.post('/api/verify-civil-id', async (req, res) => {
+app.post('/api/verify-before-register', async (req, res) => {
     const { national_id, birth_date, expiry_date } = req.body;
 
-    if (!national_id || !birth_date || !expiry_date) {
-        return res.status(400).json({ success: false, message: "حدث خطأ في البيانات المدخلة" });
-    }
-
     try {
-        const citizenQuery = await pool.query(
-            `SELECT full_name, governorate_name, unit_name, address_details 
+        const citizen = await pool.query(
+            `SELECT full_name, governorate_name, unit_name 
              FROM civil_registry 
              WHERE national_id = $1 AND birth_date = $2 AND expiry_date = $3`,
             [national_id, birth_date, expiry_date]
         );
 
-        if (citizenQuery.rows.length === 0) {
+        if (citizen.rows.length === 0) {
             return res.status(401).json({ success: false, message: "حدث خطأ في البيانات المدخلة، يرجى المراجعة" });
         }
 
+        // بنرجع البيانات اللي اليوزر محتاج يشوفها بس
         res.json({ 
             success: true, 
-            message: "تم التحقق من الهوية بنجاح",
-            data: citizenQuery.rows[0] 
+            data: {
+                full_name: citizen.rows[0].full_name,
+                governorate: citizen.rows[0].governorate_name,
+                unit: citizen.rows[0].unit_name
+            }
         });
 
     } catch (err) {
@@ -79,23 +79,25 @@ app.post('/api/register', async (req, res) => {
     }
 
     try {
+        // التحقق من السجل المدني للمرة الأخيرة لضمان الأمان
         const citizen = await pool.query(
-            `SELECT full_name FROM civil_registry 
+            `SELECT national_id FROM civil_registry 
              WHERE national_id = $1 AND birth_date = $2 AND expiry_date = $3`,
             [national_id, birth_date, expiry_date]
         );
 
         if (citizen.rows.length === 0) {
-            return res.status(401).json({ success: false, message: "حدث خطأ في البيانات المدخلة، يرجى المراجعة" });
+            return res.status(401).json({ success: false, message: "حدث خطأ في البيانات المدخلة" });
         }
 
         const hashedPassword = await bcrypt.hash(password, 10);
+        
         await pool.query(
             `INSERT INTO voters (national_id, email, password) VALUES ($1, $2, $3)`,
             [national_id, email, hashedPassword]
         );
 
-        res.status(201).json({ success: true, message: "تم التحقق من هويتك وإنشاء حسابك بنجاح" });
+        res.status(201).json({ success: true, message: "تم إنشاء حسابك بنجاح" });
 
     } catch (err) {
         if (err.code === '23505') {
