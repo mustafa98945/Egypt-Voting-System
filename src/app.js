@@ -116,50 +116,77 @@ app.post('/api/register', async (req, res) => {
 
 // --- 3. API تسجيل الدخول (Login) ---
 app.post('/api/login', async (req, res) => {
+    // بنستقبل إما الإيميل والباسورد أو الرقم القومي (لو جاي من سيستم الوش)
     const { email, password, national_id_from_face } = req.body;
 
     try {
         let user;
 
-        // الحالة الأولى: لو جاي من الـ Face Recognition (معاه National ID بس)
+        // --- الحالة الأولى: الدخول عن طريق بصمة الوجه (زميلك بعت National ID) ---
         if (national_id_from_face) {
+            console.log("Login attempt via Face Recognition for ID:", national_id_from_face);
+            
             const result = await pool.query(
                 `SELECT v.*, c.full_name, c.governorate_name, c.unit_name, c.address_details
-                 FROM voters v JOIN civil_registry c ON v.national_id = c.national_id
-                 WHERE v.national_id = $1`, [national_id_from_face]
+                 FROM voters v 
+                 JOIN civil_registry c ON v.national_id = c.national_id
+                 WHERE v.national_id = $1`, 
+                [national_id_from_face]
             );
+            
             user = result.rows[0];
-            if (!user) return res.status(404).json({ success: false, message: "الوجه معترف به لكن لا يوجد حساب مسجل لهذا الرقم" });
+            
+            if (!user) {
+                return res.status(404).json({ 
+                    success: false, 
+                    message: "الوجه معترف به، ولكن هذا الرقم القومي غير مسجل في منظومة الانتخابات." 
+                });
+            }
         } 
         
-        // الحالة الثانية: Login عادي بالإيميل والباسورد
-        else {
+        // --- الحالة الثانية: الدخول العادي (إيميل وباسورد) ---
+        else if (email && password) {
             const result = await pool.query(
                 `SELECT v.*, c.full_name, c.governorate_name, c.unit_name, c.address_details
-                 FROM voters v JOIN civil_registry c ON v.national_id = c.national_id
-                 WHERE v.email = $1`, [email]
+                 FROM voters v 
+                 JOIN civil_registry c ON v.national_id = c.national_id
+                 WHERE v.email = $1`, 
+                [email]
             );
+            
             user = result.rows[0];
-            if (!user) return res.status(404).json({ success: false, message: "الحساب غير موجود" });
 
+            if (!user) {
+                return res.status(404).json({ success: false, message: "الحساب غير موجود" });
+            }
+
+            // التأكد من الباسورد
             const isMatch = await bcrypt.compare(password, user.password);
             if (!isMatch) return res.status(401).json({ success: false, message: "كلمة المرور خطأ" });
+        } 
+        
+        // لو مبعتش لا ده ولا ده
+        else {
+            return res.status(400).json({ success: false, message: "برجاء إدخال بيانات الدخول" });
         }
 
-        // في الحالتين، لو وصلنا هنا يبقى الـ Login نجح
+        // --- النتيجة النهائية (نجاح الدخول في الحالتين) ---
         res.json({
             success: true,
             message: `أهلاً بك يا ${user.full_name}`,
             user_data: {
                 full_name: user.full_name,
                 national_id: user.national_id,
+                email: user.email,
                 governorate: user.governorate_name,
                 unit: user.unit_name,
+                address: user.address_details,
                 has_voted: user.has_voted
             }
         });
 
     } catch (err) {
+        console.error(err.message);
         res.status(500).json({ success: false, message: "خطأ في السيرفر" });
     }
 });
