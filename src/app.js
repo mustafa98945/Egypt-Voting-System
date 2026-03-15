@@ -73,69 +73,88 @@ app.post('/api/verify-civil-id', async (req, res) => {
 });
 
 // --- 2. API تسجيل الحساب النهائي (بعد التأكد من الهوية والوجه) ---
-app.post('/api/register-voter', async (req, res) => {
-    const { national_id, email, password } = req.body;
+app.post('/api/register', async (req, res) => {
+    const { 
+        national_id, birth_date, expiry_date, // بيانات السجل
+        email, password, confirm_password     // بيانات الحساب
+    } = req.body;
 
-    if (!national_id || !email || !password) {
-        return res.status(400).json({ success: false, message: "بيانات التسجيل ناقصة" });
+    // 1. التأكد إن الباسورد متطابق (زيادة أمان في الـ Back-end)
+    if (password !== confirm_password) {
+        return res.status(400).json({ success: false, message: "كلمة المرور غير متطابقة" });
     }
 
     try {
-        const hashedPassword = await bcrypt.hash(password, 10);
+        // 2. التحقق من السجل المدني أولاً
+        const citizen = await pool.query(
+            `SELECT full_name FROM civil_registry 
+             WHERE national_id = $1 AND birth_date = $2 AND expiry_date = $3`,
+            [national_id, birth_date, expiry_date]
+        );
 
-        // حفظ الحساب في جدول الناخبين وربطه بالرقم القومي
-        const newUser = await pool.query(
-            `INSERT INTO voters (national_id, email, password) 
-             VALUES ($1, $2, $3) RETURNING id`,
+        if (citizen.rows.length === 0) {
+            return res.status(401).json({ success: false, message: "بيانات البطاقة غير صحيحة أو غير مسجلة" });
+        }
+
+        // 3. لو البيانات صح، نشفر الباسورد ونحفظ الحساب
+        const hashedPassword = await bcrypt.hash(password, 10);
+        await pool.query(
+            `INSERT INTO voters (national_id, email, password) VALUES ($1, $2, $3)`,
             [national_id, email, hashedPassword]
         );
 
         res.status(201).json({ 
             success: true, 
-            message: "تم إنشاء حسابك بنجاح وجاهز للتصويت",
-            voter_id: newUser.rows[0].id 
+            message: `تم التحقق من بياناتك يا ${citizen.rows[0].full_name} وإنشاء حسابك بنجاح` 
         });
 
     } catch (err) {
-        if (err.code === '23505') { // خطأ تكرار البيانات (Unique constraint)
-            return res.status(400).json({ success: false, message: "هذا الرقم القومي أو الإيميل مسجل مسبقاً" });
-        }
-        res.status(500).json({ success: false, message: "خطأ في الداتابيز: " + err.message });
+        if (err.code === '23505') return res.status(400).json({ success: false, message: "هذا الحساب مسجل مسبقاً" });
+        res.status(500).json({ success: false, message: err.message });
     }
 });
 
 // --- 3. API تسجيل الدخول (Login) ---
 app.post('/api/login', async (req, res) => {
-    const { email, password } = req.body;
+    const { email, password, national_id_from_face } = req.body;
 
     try {
-        // نجيب بيانات الناخب + بياناته الشخصية من السجل المدني بـ JOIN واحدة
-        const userQuery = await pool.query(`
-            SELECT v.*, c.full_name, c.governorate_name, c.unit_name, c.address_details
-            FROM voters v
-            JOIN civil_registry c ON v.national_id = c.national_id
-            WHERE v.email = $1
-        `, [email]);
+        let user;
 
-        if (userQuery.rows.length === 0) {
-            return res.status(404).json({ success: false, message: "الحساب غير موجود" });
+        // الحالة الأولى: لو جاي من الـ Face Recognition (معاه National ID بس)
+        if (national_id_from_face) {
+            const result = await pool.query(
+                `SELECT v.*, c.full_name, c.governorate_name, c.unit_name, c.address_details
+                 FROM voters v JOIN civil_registry c ON v.national_id = c.national_id
+                 WHERE v.national_id = $1`, [national_id_from_face]
+            );
+            user = result.rows[0];
+            if (!user) return res.status(404).json({ success: false, message: "الوجه معترف به لكن لا يوجد حساب مسجل لهذا الرقم" });
+        } 
+        
+        // الحالة الثانية: Login عادي بالإيميل والباسورد
+        else {
+            const result = await pool.query(
+                `SELECT v.*, c.full_name, c.governorate_name, c.unit_name, c.address_details
+                 FROM voters v JOIN civil_registry c ON v.national_id = c.national_id
+                 WHERE v.email = $1`, [email]
+            );
+            user = result.rows[0];
+            if (!user) return res.status(404).json({ success: false, message: "الحساب غير موجود" });
+
+            const isMatch = await bcrypt.compare(password, user.password);
+            if (!isMatch) return res.status(401).json({ success: false, message: "كلمة المرور خطأ" });
         }
 
-        const user = userQuery.rows[0];
-        const isMatch = await bcrypt.compare(password, user.password);
-
-        if (!isMatch) return res.status(401).json({ success: false, message: "كلمة المرور خطأ" });
-
+        // في الحالتين، لو وصلنا هنا يبقى الـ Login نجح
         res.json({
             success: true,
-            message: "أهلاً بك يا " + user.full_name,
+            message: `أهلاً بك يا ${user.full_name}`,
             user_data: {
                 full_name: user.full_name,
-                email: user.email,
                 national_id: user.national_id,
                 governorate: user.governorate_name,
                 unit: user.unit_name,
-                address: user.address_details,
                 has_voted: user.has_voted
             }
         });
@@ -144,7 +163,6 @@ app.post('/api/login', async (req, res) => {
         res.status(500).json({ success: false, message: "خطأ في السيرفر" });
     }
 });
-
 // --- 4. API المحافظات (للعرض في الاختيارات لو احتاجت) ---
 app.get('/api/governorates', async (req, res) => {
     try {
