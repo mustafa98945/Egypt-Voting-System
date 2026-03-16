@@ -1,9 +1,10 @@
 const Voter = require('../models/voterModel');
 const bcrypt = require('bcrypt');
 const sharp = require('sharp');
+const jwt = require('jsonwebtoken'); // إضافة JWT
 const { uploadToSupabase } = require('../utils/supabaseHelper');
 
-// --- دالة مساعدة لمعالجة الصور (بنفس المنطق الموحد للمشروع) ---
+// --- دالة مساعدة لمعالجة الصور ---
 const processAndUpload = async (fileBuffer, fileName, folder = 'voters', width = 1000, quality = 80) => {
     try {
         const optimized = await sharp(fileBuffer)
@@ -18,7 +19,7 @@ const processAndUpload = async (fileBuffer, fileName, folder = 'voters', width =
     }
 };
 
-// 1. التحقق قبل التسجيل
+// 1. التحقق قبل التسجيل (لا يحتاج لتعديل)
 exports.verifyBeforeRegister = async (req, res) => {
     const { national_id, birth_date, expiry_date } = req.body;
     try {
@@ -50,7 +51,7 @@ exports.registerVoter = async (req, res) => {
             return res.status(401).json({ success: false, message: "بيانات الهوية غير مطابقة للسجل المدني" });
         }
 
-        // --- استخدام الدالة الموحدة لمعالجة الرفع ---
+        // --- معالجة الرفع (اختياري) ---
         let partyCardUrl = null;
         if (req.files && req.files['party_card_url']) {
             const file = req.files['party_card_url'][0];
@@ -80,7 +81,7 @@ exports.registerVoter = async (req, res) => {
     }
 };
 
-// 3. تسجيل الدخول
+// 3. تسجيل الدخول (تم إضافة التوكن)
 exports.login = async (req, res) => {
     const { email, password, national_id_from_face } = req.body;
     try {
@@ -98,8 +99,16 @@ exports.login = async (req, res) => {
 
         if (!user) return res.status(401).json({ success: false, message: "بيانات الدخول غير صحيحة" });
 
+        // --- توليد التوكن (JWT) ---
+        const token = jwt.sign(
+            { voter_id: user.voter_id, national_id: user.national_id },
+            process.env.JWT_SECRET,
+            { expiresIn: '24h' }
+        );
+
         res.json({ 
             success: true, 
+            token, // نرسل التوكن للفرونت إند
             user_data: { 
                 voter_id: user.voter_id, 
                 full_name: user.full_name, 

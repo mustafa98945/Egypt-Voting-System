@@ -2,13 +2,14 @@ const Candidate = require('../models/candidateModel');
 const Voter = require('../models/voterModel');
 const bcrypt = require('bcrypt');
 const sharp = require('sharp');
+const jwt = require('jsonwebtoken'); // إضافة JWT
 const { uploadToSupabase } = require('../utils/supabaseHelper');
 
-// --- دالة مساعدة لمعالجة الصور وضغطها (خارج الـ exports عشان النضافة) ---
+// --- دالة مساعدة لمعالجة الصور وضغطها ---
 const processAndUpload = async (fileBuffer, fileName, folder = 'candidates', width = 1000, quality = 80) => {
     try {
         const optimized = await sharp(fileBuffer)
-            .resize({ width, withoutEnlargement: true }) // تكبير الصورة لو صغيرة بيوظ جودتها، فبنمنع ده
+            .resize({ width, withoutEnlargement: true })
             .jpeg({ quality })
             .toBuffer();
             
@@ -32,13 +33,30 @@ exports.registerCandidate = async (req, res) => {
             return res.status(400).json({ success: false, message: "كلمات المرور غير متطابقة" });
         }
 
-        // 2. التحقق من السجل المدني (Voter Registry)
-        const citizen = await Voter.verifyInRegistry(national_id, birth_date);
+        // 2. التحقق من المستندات الإجبارية (Validation)
+        // ملاحظة: party_card_url مستبعد من هنا لأنه اختياري
+        const requiredFiles = [
+            'national_id_card_url', 'education_url', 'military_service_url',
+            'birth_certificate_url', 'criminal_record_url', 'fitness_health_url',
+            'deposit_receipt_url', 'election_symbol_url'
+        ];
+
+        for (const field of requiredFiles) {
+            if (!req.files || !req.files[field]) {
+                return res.status(400).json({ 
+                    success: false, 
+                    message: `المستند (${field}) مطلوب لإتمام عملية الترشح` 
+                });
+            }
+        }
+
+        // 3. التحقق من السجل المدني
+        const citizen = await Voter.verifyInRegistry(national_id, birth_date, expiry_date);
         if (!citizen) {
             return res.status(401).json({ success: false, message: "بيانات الهوية غير مطابقة للسجل المدني" });
         }
 
-        // 3. معالجة الصور الشخصية المتعددة
+        // 4. معالجة الصور الشخصية المتعددة (إجبارية)
         let personalPhotosUrls = [];
         if (req.files && req.files['personal_photos_url']) {
             const photos = req.files['personal_photos_url'];
@@ -46,18 +64,18 @@ exports.registerCandidate = async (req, res) => {
                 const url = await processAndUpload(
                     photos[i].buffer, 
                     `personal_${national_id}_${Date.now()}_${i}.jpg`,
-                    'candidates', 600, 75 // الصور الشخصية مش محتاجة مساحة عملاقة
+                    'candidates', 600, 75
                 );
                 personalPhotosUrls.push(url);
             }
+        } else {
+            return res.status(400).json({ success: false, message: "يجب رفع صورة شخصية واحدة على الأقل" });
         }
 
-        // 4. معالجة باقي المستندات الرسمية (أتوماتيك)
+        // 5. معالجة باقي المستندات (الكل إجباري ماعدا الكارنيه)
         const fileFields = [
-            'national_id_card_url', 'education_url', 'military_service_url',
-            'financial_disclosure_url', 'birth_certificate_url', 'fitness_health_url',
-            'criminal_record_url', 'deposit_receipt_url', 'election_symbol_url',
-            'party_card_url'
+            ...requiredFiles,
+            'party_card_url' // الكارنيه موجود هنا للمعالجة لكنه ليس في الـ requiredFiles
         ];
 
         let uploadedFiles = {};
@@ -69,16 +87,16 @@ exports.registerCandidate = async (req, res) => {
                     `${field}_${national_id}_${Date.now()}.jpg`
                 );
             } else {
-                // لو مفيش ملف مرفوع، بنشوف لو باعت URL جاهز (للاختبار) أو نحط null
-                uploadedFiles[field] = req.body[field] || null;
+                // لو مفيش ملف (خاصة في الكارنيه)، هينزل null
+                uploadedFiles[field] = null;
             }
         }
 
-        // 5. تشفير كلمة المرور وتجهيز البيانات
+        // 6. تشفير كلمة المرور وتجهيز البيانات
         const hashedPassword = await bcrypt.hash(password, 10);
         const finalPhones = Array.isArray(phone_numbers) ? phone_numbers.slice(0, 3) : [];
 
-        // 6. إنشاء السجل في قاعدة البيانات
+        // 7. إنشاء السجل
         const newCandidate = await Candidate.create({
             national_id, email, password: hashedPassword,
             phone_numbers: finalPhones,
@@ -103,7 +121,7 @@ exports.registerCandidate = async (req, res) => {
     }
 };
 
-// 2. تسجيل الدخول الذكي
+// 2. تسجيل الدخول (مع JWT Token)
 exports.loginCandidate = async (req, res) => {
     const { loginIdentifier, password } = req.body;
     try {
@@ -118,8 +136,16 @@ exports.loginCandidate = async (req, res) => {
             return res.status(401).json({ success: false, message: "كلمة المرور غير صحيحة" });
         }
 
+        // توليد التوكن
+        const token = jwt.sign(
+            { candidate_id: candidate.candidate_id, role: 'candidate' },
+            process.env.JWT_SECRET,
+            { expiresIn: '24h' }
+        );
+
         res.status(200).json({
             success: true,
+            token, // إرسال التوكن لـ Postman/Frontend
             message: `أهلاً بك يا ${candidate.full_name.split(' ')[0]}`,
             data: {
                 id: candidate.candidate_id,
