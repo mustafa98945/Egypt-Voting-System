@@ -28,53 +28,58 @@ exports.registerCandidate = async (req, res) => {
             phone_numbers, short_bio, candidate_type, occupation, degree
         } = req.body;
 
-        // 1. التأكد من وجود كل البيانات النصية (Text)
+        // 1. التأكد من وجود كل البيانات النصية (Text) - تم إضافة phone_numbers و short_bio
         const requiredTextFields = [
             'national_id', 'birth_date', 'expiry_date', 'email', 
-            'password', 'confirm_password', 'candidate_type', 'occupation', 'degree'
+            'password', 'confirm_password', 'candidate_type', 'occupation', 'degree',
+            'phone_numbers', 'short_bio'
         ];
         
         for (const field of requiredTextFields) {
             if (!req.body[field]) {
-                return res.status(400).json({ success: false, message: `الحقل النصي (${field}) مطلوب` });
+                return res.status(400).json({ 
+                    success: false, 
+                    message: `الحقل النصي (${field}) مطلوب لإتمام عملية التسجيل` 
+                });
             }
         }
 
+        // التأكد من تطابق كلمة المرور
         if (password !== confirm_password) {
             return res.status(400).json({ success: false, message: "كلمات المرور غير متطابقة" });
         }
 
         // 2. القائمة النهائية للملفات الإجبارية (10 ملفات)
         const mandatoryFiles = [
-            'personal_photos_url',     // مصفوفة صور
+            'personal_photos_url',     // مصفوفة صور شخصية
             'national_id_card_url',    // صورة البطاقة
-            'education_url',           // المؤهل
-            'military_service_url',    // الجيش
-            'financial_disclosure_url',// الذمة المالية
-            'birth_certificate_url',   // الميلاد
+            'education_url',           // المؤهل الدراسي
+            'military_service_url',    // شهادة الجيش
+            'financial_disclosure_url',// إقرار الذمة المالية
+            'birth_certificate_url',   // شهادة الميلاد
             'fitness_health_url',      // الكشف الطبي
-            'criminal_record_url',     // الفيش
-            'deposit_receipt_url',     // الإيصال
-            'election_symbol_url'      // الرمز
+            'criminal_record_url',     // الفيش والتشبيه
+            'deposit_receipt_url',     // إيصال التأمين
+            'election_symbol_url'      // رمز المرشح
         ];
 
-        // التحقق إن كل الملفات دي موجودة في الطلب
+        // التحقق إن كل الملفات الإجبارية موجودة في الطلب
         for (const fileKey of mandatoryFiles) {
             if (!req.files || !req.files[fileKey]) {
                 return res.status(400).json({ 
                     success: false, 
-                    message: `يجب رفع ملف: (${fileKey}) لإتمام الطلب` 
+                    message: `يجب رفع ملف: (${fileKey}) لإتمام طلب الترشح` 
                 });
             }
         }
 
-        // 3. التحقق من السجل المدني
+        // 3. التحقق من بيانات الهوية في السجل المدني
         const citizen = await Voter.verifyInRegistry(national_id, birth_date, expiry_date);
         if (!citizen) {
             return res.status(401).json({ success: false, message: "بيانات الهوية غير مطابقة للسجل المدني" });
         }
 
-        // 4. معالجة الصور الشخصية (مصفوفة)
+        // 4. معالجة الصور الشخصية (مصفوفة) - رفع لـ Supabase
         let personalPhotosUrls = [];
         const photos = req.files['personal_photos_url'];
         for (let i = 0; i < photos.length; i++) {
@@ -86,12 +91,12 @@ exports.registerCandidate = async (req, res) => {
             personalPhotosUrls.push(url);
         }
 
-        // 5. معالجة باقي الملفات (الكل إجباري + الكارنيه اختياري)
+        // 5. معالجة باقي الملفات (الكل إجباري + الكارنيه الحزبي اختياري)
         const allPossibleFiles = [
             'national_id_card_url', 'education_url', 'military_service_url',
             'financial_disclosure_url', 'birth_certificate_url', 'fitness_health_url',
             'criminal_record_url', 'deposit_receipt_url', 'election_symbol_url',
-            'party_card_url' // ده هيلف عليه برضه بس لو مفيش هينزل null
+            'party_card_url' // اختياري: سيبقى null لو لم يتم رفعه
         ];
 
         let uploadedFiles = {};
@@ -103,27 +108,41 @@ exports.registerCandidate = async (req, res) => {
                     `${field}_${national_id}_${Date.now()}.jpg`
                 );
             } else {
-                // الكارنيه هو الوحيد اللي ممكن يوصل هنا ويبقى null
+                // الكارنيه هو الوحيد الذي يمكن أن يصل هنا ويكون null دون اعتراض الـ Validation
                 uploadedFiles[field] = null; 
             }
         }
 
-        // 6. التشفير والحفظ في الداتابيز (باقي الكود كما هو...)
+        // 6. تشفير كلمة المرور وحفظ المرشح في قاعدة البيانات
         const hashedPassword = await bcrypt.hash(password, 10);
+        
         const newCandidate = await Candidate.create({
-            national_id, email, password: hashedPassword,
+            national_id, 
+            email, 
+            password: hashedPassword,
+            // التأكد أن أرقام الهاتف مصفوفة
             phone_numbers: Array.isArray(phone_numbers) ? phone_numbers : [phone_numbers],
-            short_bio, candidate_type, occupation, degree,
-            birth_date, expiry_date,
+            short_bio, 
+            candidate_type, 
+            occupation, 
+            degree,
+            birth_date, 
+            expiry_date,
             personal_photos_url: personalPhotosUrls,
-            ...uploadedFiles
+            ...uploadedFiles // دمج روابط الملفات المرفوعة
         });
 
-        res.status(201).json({ success: true, message: "تم تقديم طلبك بنجاح" });
+        res.status(201).json({ 
+            success: true, 
+            message: "تم تقديم طلب الترشح بنجاح وهو الآن قيد المراجعة" 
+        });
 
     } catch (err) {
-        console.error(err);
-        res.status(500).json({ success: false, message: "خطأ في السيرفر" });
+        console.error("Candidate Registration Error:", err);
+        if (err.code === '23505') {
+            return res.status(400).json({ success: false, message: "هذا الرقم القومي أو البريد الإلكتروني مسجل كمرشح بالفعل" });
+        }
+        res.status(500).json({ success: false, message: "حدث خطأ في السيرفر أثناء التسجيل" });
     }
 };
 // 2. تسجيل الدخول (مع JWT Token)
