@@ -2,7 +2,22 @@ const Candidate = require('../models/candidateModel');
 const Voter = require('../models/voterModel');
 const bcrypt = require('bcrypt');
 const sharp = require('sharp');
-const { uploadToSupabase } = require('../utils/supabaseHelper'); 
+const { uploadToSupabase } = require('../utils/supabaseHelper');
+
+// --- دالة مساعدة لمعالجة الصور وضغطها (خارج الـ exports عشان النضافة) ---
+const processAndUpload = async (fileBuffer, fileName, folder = 'candidates', width = 1000, quality = 80) => {
+    try {
+        const optimized = await sharp(fileBuffer)
+            .resize({ width, withoutEnlargement: true }) // تكبير الصورة لو صغيرة بيوظ جودتها، فبنمنع ده
+            .jpeg({ quality })
+            .toBuffer();
+            
+        return await uploadToSupabase(optimized, fileName, folder);
+    } catch (error) {
+        console.error(`خطأ في معالجة الملف ${fileName}:`, error);
+        throw new Error("فشل في معالجة الصور");
+    }
+};
 
 // 1. تسجيل مرشح جديد
 exports.registerCandidate = async (req, res) => {
@@ -12,26 +27,18 @@ exports.registerCandidate = async (req, res) => {
             phone_numbers, short_bio, candidate_type, occupation, degree
         } = req.body;
 
+        // 1. التحقق من تطابق كلمة المرور
         if (password !== confirm_password) {
             return res.status(400).json({ success: false, message: "كلمات المرور غير متطابقة" });
         }
 
+        // 2. التحقق من السجل المدني (Voter Registry)
         const citizen = await Voter.verifyInRegistry(national_id, birth_date);
         if (!citizen) {
             return res.status(401).json({ success: false, message: "بيانات الهوية غير مطابقة للسجل المدني" });
         }
 
-        // --- التعديل هنا: وظيفة داخلية لرفع الصور مع تحديد فولدر candidates ---
-        const processAndUpload = async (fileBuffer, fileName, width = 800, quality = 70) => {
-            const optimized = await sharp(fileBuffer)
-                .resize(width) 
-                .jpeg({ quality })
-                .toBuffer();
-            // بنبعت 'candidates' كبارامتر تالت للدالة الجديدة
-            return await uploadToSupabase(optimized, fileName, 'candidates');
-        };
-
-        // معالجة الصور الشخصية المتعددة
+        // 3. معالجة الصور الشخصية المتعددة
         let personalPhotosUrls = [];
         if (req.files && req.files['personal_photos_url']) {
             const photos = req.files['personal_photos_url'];
@@ -39,19 +46,19 @@ exports.registerCandidate = async (req, res) => {
                 const url = await processAndUpload(
                     photos[i].buffer, 
                     `personal_${national_id}_${Date.now()}_${i}.jpg`,
-                    600, 70
+                    'candidates', 600, 75 // الصور الشخصية مش محتاجة مساحة عملاقة
                 );
                 personalPhotosUrls.push(url);
             }
         }
 
-        // معالجة باقي المستندات الرسمية
+        // 4. معالجة باقي المستندات الرسمية (أتوماتيك)
         const fileFields = [
-    'national_id_card_url', 'education_url', 'military_service_url',
-    'financial_disclosure_url', 'birth_certificate_url', 'fitness_health_url',
-    'criminal_record_url', 'deposit_receipt_url', 'election_symbol_url',
-    'party_card_url' // <--- إضافة كارنيه الحزب هنا
-];
+            'national_id_card_url', 'education_url', 'military_service_url',
+            'financial_disclosure_url', 'birth_certificate_url', 'fitness_health_url',
+            'criminal_record_url', 'deposit_receipt_url', 'election_symbol_url',
+            'party_card_url'
+        ];
 
         let uploadedFiles = {};
         for (const field of fileFields) {
@@ -59,17 +66,19 @@ exports.registerCandidate = async (req, res) => {
                 const file = req.files[field][0];
                 uploadedFiles[field] = await processAndUpload(
                     file.buffer, 
-                    `${field}_${national_id}_${Date.now()}.jpg`,
-                    1000, 80 
+                    `${field}_${national_id}_${Date.now()}.jpg`
                 );
             } else {
+                // لو مفيش ملف مرفوع، بنشوف لو باعت URL جاهز (للاختبار) أو نحط null
                 uploadedFiles[field] = req.body[field] || null;
             }
         }
 
+        // 5. تشفير كلمة المرور وتجهيز البيانات
         const hashedPassword = await bcrypt.hash(password, 10);
         const finalPhones = Array.isArray(phone_numbers) ? phone_numbers.slice(0, 3) : [];
 
+        // 6. إنشاء السجل في قاعدة البيانات
         const newCandidate = await Candidate.create({
             national_id, email, password: hashedPassword,
             phone_numbers: finalPhones,
@@ -81,13 +90,14 @@ exports.registerCandidate = async (req, res) => {
 
         res.status(201).json({ 
             success: true, 
-            message: "تم تقديم طلب الترشح بنجاح، ورمزك الانتخابي قيد المراجعة",
+            message: "تم تقديم طلب الترشح بنجاح، وطلبك قيد المراجعة",
             data: { candidate_id: newCandidate.candidate_id, age: newCandidate.calculated_age }
         });
 
     } catch (err) {
+        console.error("Register Error:", err);
         if (err.code === '23505') {
-            return res.status(400).json({ success: false, message: "هذا الرقم القومي أو الإيميل مسجل كمرشح بالفعل" });
+            return res.status(400).json({ success: false, message: "هذا الرقم القومي أو البريد الإلكتروني مسجل بالفعل" });
         }
         res.status(500).json({ success: false, message: "حدث خطأ في السيرفر أثناء المعالجة" });
     }
@@ -97,17 +107,17 @@ exports.registerCandidate = async (req, res) => {
 exports.loginCandidate = async (req, res) => {
     const { loginIdentifier, password } = req.body;
     try {
-        let candidate = await Candidate.findByEmail(loginIdentifier);
-        if (!candidate) {
-            candidate = await Candidate.findByNationalId(loginIdentifier);
-        }
+        let candidate = await Candidate.findByEmail(loginIdentifier) || await Candidate.findByNationalId(loginIdentifier);
+
         if (!candidate) {
             return res.status(404).json({ success: false, message: "هذا الحساب غير موجود" });
         }
+
         const isMatch = await bcrypt.compare(password, candidate.password);
         if (!isMatch) {
             return res.status(401).json({ success: false, message: "كلمة المرور غير صحيحة" });
         }
+
         res.status(200).json({
             success: true,
             message: `أهلاً بك يا ${candidate.full_name.split(' ')[0]}`,

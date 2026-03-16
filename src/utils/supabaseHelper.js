@@ -1,6 +1,5 @@
 const { createClient } = require('@supabase/supabase-js');
 
-// إعداد عميل Supabase
 const supabase = createClient(
     process.env.SUPABASE_URL,
     process.env.SUPABASE_ANON_KEY
@@ -8,14 +7,17 @@ const supabase = createClient(
 
 /**
  * دالة رفع الملفات الديناميكية
- * @param {Buffer} fileBuffer - محتوى الصورة
- * @param {string} fileName - اسم الملف
- * @param {string} folderName - اسم الفولدر (الافتراضي candidates)
+ * @param {Buffer} fileBuffer - محتوى الصورة المعالج بـ sharp
+ * @param {string} fileName - اسم الملف الفريد
+ * @param {string} folderName - اسم الفولدر داخل الباكت (مثل candidates أو voters)
  */
 exports.uploadToSupabase = async (fileBuffer, fileName, folderName = 'candidates') => {
-    // 1. عملية الرفع مع تحديد المسار (Folder/File)
+    // اسم الباكت الرئيسي اللي إنت كريته في سوبابيس
+    const bucketName = 'voters_cards'; 
+
+    // 1. عملية الرفع
     const { data, error } = await supabase.storage
-        .from('voters_cards') 
+        .from(bucketName)
         .upload(`${folderName}/${fileName}`, fileBuffer, { 
             contentType: 'image/jpeg',
             upsert: true 
@@ -23,12 +25,12 @@ exports.uploadToSupabase = async (fileBuffer, fileName, folderName = 'candidates
 
     if (error) {
         console.error('Supabase Upload Error:', error.message);
-        throw new Error('خطأ أثناء الرفع لـ Supabase: ' + error.message);
+        throw new Error('فشل رفع الملف إلى Supabase');
     }
 
-    // 2. الحصول على الرابط العام بنفس المسار الديناميكي
+    // 2. الحصول على الرابط العام
     const { data: publicUrlData } = supabase.storage
-        .from('voters_cards')
+        .from(bucketName)
         .getPublicUrl(`${folderName}/${fileName}`);
 
     return publicUrlData.publicUrl;

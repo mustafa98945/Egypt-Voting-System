@@ -1,7 +1,7 @@
 const pool = require('../config/db');
 
 class Candidate {
-    // 1. تسجيل مرشح جديد (دعم مصفوفة الصور وحساب العمر)
+    // 1. تسجيل مرشح جديد (دعم مصفوفة الصور وحساب العمر + كارنيه الحزب)
     static async create(data) {
         const birthDate = new Date(data.birth_date);
         const today = new Date();
@@ -18,10 +18,10 @@ class Candidate {
                 national_id_card_url, education_url, military_service_url, 
                 financial_disclosure_url, personal_photos_url, birth_certificate_url, 
                 fitness_health_url, criminal_record_url, deposit_receipt_url, 
-                election_symbol_url
+                election_symbol_url, party_card_url
             ) VALUES (
                 $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 
-                $11, $12, $13, $14, $15::text[], $16, $17, $18, $19, $20
+                $11, $12, $13, $14, $15::text[], $16, $17, $18, $19, $20, $21
             ) RETURNING *`;
 
         const values = [
@@ -30,7 +30,7 @@ class Candidate {
             data.national_id_card_url, data.education_url, data.military_service_url,
             data.financial_disclosure_url, data.personal_photos_url, data.birth_certificate_url,
             data.fitness_health_url, data.criminal_record_url, data.deposit_receipt_url, 
-            data.election_symbol_url 
+            data.election_symbol_url, data.party_card_url // <--- الحقل الجديد هنا
         ];
 
         const result = await pool.query(queryText, values);
@@ -41,7 +41,7 @@ class Candidate {
         };
     }
 
-    // 2. البحث بالإيميل مع JOIN (للبيانات الكاملة - يستخدم في Login المرشح)
+    // 2. البحث بالإيميل مع JOIN (للبيانات الكاملة)
     static async findByEmail(email) {
         const result = await pool.query(
             `SELECT c.*, cr.full_name, cr.governorate_name, cr.unit_name 
@@ -63,19 +63,19 @@ class Candidate {
         return result.rows[0];
     }
 
-    // 4. جلب قائمة المرشحين للمحافظة (العرض العام للناخبين - يراعي الخصوصية)
+    // 4. جلب قائمة المرشحين للمحافظة (العرض العام للناخبين)
     static async getAllByGovernorate(governorate) {
         const result = await pool.query(
             `SELECT 
                 c.candidate_id, 
-                cr.full_name,          -- الاسم من السجل المدني
-                c.occupation,         -- المهنة
-                c.degree,             -- المؤهل
-                c.candidate_type,     -- الفئة (عمال/فلاحين...)
-                c.election_symbol_url, -- الرمز
-                c.personal_photos_url[1] as main_photo, -- الصورة الشخصية الأولى فقط
-                c.short_bio,          -- النبذة
-                EXTRACT(YEAR FROM AGE(c.birth_date)) as age -- السن فقط بدون تاريخ الميلاد الكامل
+                cr.full_name, 
+                c.occupation, 
+                c.degree, 
+                c.candidate_type, 
+                c.election_symbol_url, 
+                c.personal_photos_url[1] as main_photo, 
+                c.short_bio, 
+                EXTRACT(YEAR FROM AGE(c.birth_date)) as age 
              FROM candidates c
              JOIN civil_registry cr ON c.national_id = cr.national_id
              WHERE cr.governorate_name = $1`, 

@@ -1,29 +1,35 @@
 const express = require('express');
 const router = express.Router();
-const voterController = require('../controllers/voterControllers'); 
-const upload = require('../middlewares/multer'); 
-const auth = require('../middlewares/authMiddleware'); // لحماية الروتس الحساسة
+const voterController = require('../controllers/voterControllers');
+const voteController = require('../controllers/voteController'); 
+const auth = require('../middlewares/authMiddleware'); 
 
-// 1. التحقق من البيانات في السجل المدني (قبل إنشاء الحساب)
-// روت عام: متاح لأي مواطن يتأكد من بياناته
+// استيراد multer وإعداده
+const multer = require('multer');
+const storage = multer.memoryStorage();
+const upload = multer({ 
+    storage: storage,
+    limits: { fileSize: 3 * 1024 * 1024 } 
+});
+
+// --- الروابط (Routes) ---
+
+// 1. التحقق من البيانات في السجل المدني (قبل التسجيل)
 router.post('/verify', voterController.verifyBeforeRegister);
 
-// 2. تسجيل حساب ناخب جديد (يستقبل صورة كارنيه الحزب/البطاقة)
-// روت عام: لإنشاء الحساب لأول مرة
+// 2. تسجيل حساب ناخب جديد (مع رفع الصور)
 router.post('/register', upload.fields([
     { name: 'party_card_url', maxCount: 1 }
 ]), voterController.registerVoter);
 
 // 3. تسجيل الدخول
-// روت عام: بيتحقق من البيانات وبيرجع الـ Token
 router.post('/login', voterController.login);
 
-// --- الروتس اللي جاية دي أمثلة للي هنحتاجه في مرحلة التصويت ---
+// 4. عملية التصويت (محمي بـ JWT)
+// هنا بنستخدم الـ auth عشان نتأكد إن المستخدم مسجل دخول
+router.post('/vote', auth, voteController.castVote);
 
-// 4. الحصول على بيانات الناخب الحالية (محمي بالـ Token)
+// 5. الحصول على بيانات الناخب (محمي) - مفيد للـ Profile في الـ App
 // router.get('/me', auth, voterController.getMe);
-
-// 5. عملية التصويت (محمي بالـ Token)
-// router.post('/vote', auth, voteController.castVote);
 
 module.exports = router;
