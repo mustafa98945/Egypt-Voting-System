@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const voterController = require('../controllers/voterControllers');
 const voteController = require('../controllers/voteController'); 
-const auth = require('../middlewares/authMiddleware'); 
+const auth = require('../middleware/authMiddleware');
 
 // استيراد multer وإعداده
 const multer = require('multer');

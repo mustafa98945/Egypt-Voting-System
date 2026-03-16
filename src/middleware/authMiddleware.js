@@ -1,39 +1,34 @@
-const jwt = require('jsonwebtoken');
+const express = require('express');
+const router = express.Router();
+const candidateController = require('../controllers/candidateController');
+const auth = require('../middleware/authMiddleware'); // تم تصحيح المسار هنا (شيلنا الـ s)
 
-/**
- * ميدل وير للتحقق من التوكن (JWT)
- * بيضمن إن المستخدم مسجل دخول ومعاه صلاحية الوصول
- */
-const authMiddleware = (req, res, next) => {
-    // 1. الحصول على الـ Token من الهيدر
-    // بيبقى بالشكل ده في الـ Header: Authorization: Bearer <TOKEN>
-    const authHeader = req.headers['authorization'];
-    const token = authHeader && authHeader.split(' ')[1];
+// إعداد multer
+const multer = require('multer');
+const storage = multer.memoryStorage();
+const upload = multer({ 
+    storage: storage,
+    limits: { fileSize: 5 * 1024 * 1024 } // 5 ميجا
+});
 
-    // 2. لو مفيش توكن، ارفض الطلب فوراً
-    if (!token) {
-        return res.status(401).json({ 
-            success: false, 
-            message: "دخول غير مصرح به، يرجى تسجيل الدخول أولاً" 
-        });
-    }
+// تعريف الحقول
+const candidateUploadFields = upload.fields([
+    { name: 'party_card_url', maxCount: 1 },
+    { name: 'personal_photos_url', maxCount: 5 },
+    { name: 'national_id_card_url', maxCount: 1 },
+    { name: 'education_url', maxCount: 1 },
+    { name: 'military_service_url', maxCount: 1 },
+    { name: 'financial_disclosure_url', maxCount: 1 },
+    { name: 'birth_certificate_url', maxCount: 1 },
+    { name: 'fitness_health_url', maxCount: 1 },
+    { name: 'criminal_record_url', maxCount: 1 },
+    { name: 'deposit_receipt_url', maxCount: 1 },
+    { name: 'election_symbol_url', maxCount: 1 }
+]);
 
-    try {
-        // 3. التحقق من صحة التوكن باستخدام السر (JWT_SECRET) الموجود في الـ .env
-        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+// الروابط
+router.post('/register', candidateUploadFields, candidateController.registerCandidate);
+router.post('/loginCandidate', candidateController.loginCandidate);
+router.get('/list', candidateController.listCandidates);
 
-        // 4. تخزين بيانات المستخدم (voter_id مثلاً) داخل الـ req عشان الـ Controller يستخدمها
-        req.user = decoded;
-
-        // 5. السماح بالانتقال للمرحلة التالية (الـ Controller)
-        next();
-    } catch (err) {
-        // 6. لو التوكن غلط أو منتهي الصلاحية
-        return res.status(403).json({ 
-            success: false, 
-            message: "جلسة الدخول منتهية أو غير صالحة، يرجى إعادة تسجيل الدخول" 
-        });
-    }
-};
-
-module.exports = authMiddleware;
+module.exports = router;
