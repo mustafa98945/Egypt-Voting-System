@@ -1,7 +1,7 @@
 const pool = require('../config/db');
 
 class Candidate {
-    // 1. تسجيل مرشح جديد (كودك شغال تمام)
+    // 1. تسجيل مرشح جديد (دعم مصفوفة الصور وحساب العمر)
     static async create(data) {
         const birthDate = new Date(data.birth_date);
         const today = new Date();
@@ -21,7 +21,7 @@ class Candidate {
                 election_symbol_url
             ) VALUES (
                 $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 
-                $11, $12, $13, $14, $15, $16, $17, $18, $19, $20
+                $11, $12, $13, $14, $15::text[], $16, $17, $18, $19, $20
             ) RETURNING *`;
 
         const values = [
@@ -41,7 +41,7 @@ class Candidate {
         };
     }
 
-    // 2. البحث بالإيميل مع JOIN لجلب الاسم والبيانات الشخصية
+    // 2. البحث بالإيميل مع JOIN (للبيانات الكاملة - يستخدم في Login المرشح)
     static async findByEmail(email) {
         const result = await pool.query(
             `SELECT c.*, cr.full_name, cr.governorate_name, cr.unit_name 
@@ -52,7 +52,7 @@ class Candidate {
         return result.rows[0];
     }
 
-    // 3. البحث بالرقم القومي مع JOIN لجلب الاسم والبيانات الشخصية
+    // 3. البحث بالرقم القومي (يستخدم في التحقق وبصمة الوجه)
     static async findByNationalId(national_id) {
         const result = await pool.query(
             `SELECT c.*, cr.full_name, cr.governorate_name, cr.unit_name 
@@ -61,6 +61,27 @@ class Candidate {
              WHERE c.national_id = $1`, [national_id]
         );
         return result.rows[0];
+    }
+
+    // 4. جلب قائمة المرشحين للمحافظة (العرض العام للناخبين - يراعي الخصوصية)
+    static async getAllByGovernorate(governorate) {
+        const result = await pool.query(
+            `SELECT 
+                c.candidate_id, 
+                cr.full_name,          -- الاسم من السجل المدني
+                c.occupation,         -- المهنة
+                c.degree,             -- المؤهل
+                c.candidate_type,     -- الفئة (عمال/فلاحين...)
+                c.election_symbol_url, -- الرمز
+                c.personal_photos_url[1] as main_photo, -- الصورة الشخصية الأولى فقط
+                c.short_bio,          -- النبذة
+                EXTRACT(YEAR FROM AGE(c.birth_date)) as age -- السن فقط بدون تاريخ الميلاد الكامل
+             FROM candidates c
+             JOIN civil_registry cr ON c.national_id = cr.national_id
+             WHERE cr.governorate_name = $1`, 
+            [governorate]
+        );
+        return result.rows;
     }
 }
 
