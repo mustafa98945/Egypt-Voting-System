@@ -9,11 +9,14 @@ const pool = require('../config/db');
 const processBase64AndUpload = async (base64String, fileName, folder = 'candidates') => {
     try {
         if (!base64String || typeof base64String !== 'string') return null;
+        
+        // تنظيف نص الـ Base64 واستخراج البيانات الصافية
         const base64Data = base64String.split(';base64,').pop();
         const buffer = Buffer.from(base64Data, 'base64');
         if (buffer.length === 0) return null;
 
         try {
+            // تحسين الصورة (تصغير الحجم وتعديل الدوران)
             const optimized = await sharp(buffer)
                 .rotate()
                 .resize({ width: 1000, withoutEnlargement: true })
@@ -21,6 +24,7 @@ const processBase64AndUpload = async (base64String, fileName, folder = 'candidat
                 .toBuffer();
             return await uploadToSupabase(optimized, fileName, folder);
         } catch (sharpError) {
+            // رفع الملف الأصلي في حال فشل Sharp
             return await uploadToSupabase(buffer, fileName, folder);
         }
     } catch (error) {
@@ -28,19 +32,23 @@ const processBase64AndUpload = async (base64String, fileName, folder = 'candidat
     }
 };
 
-// --- تسجيل مرشح جديد ---
+// --- 1. تسجيل مرشح جديد ---
 exports.registerCandidate = async (req, res) => {
     try {
         const data = req.body;
+
+        // التحقق من تطابق كلمة المرور
         if (data.password !== data.confirm_password) {
             return res.status(400).json({ success: false, message: "كلمات المرور غير متطابقة" });
         }
 
+        // التحقق من السجل المدني (Voter Registry)
         const citizen = await Voter.verifyInRegistry(data.national_id, data.birth_date, data.expiry_date);
         if (!citizen) {
             return res.status(401).json({ success: false, message: "بيانات الهوية غير مطابقة للسجل المدني" });
         }
 
+        // معالجة الصور الشخصية (Array)
         let personalPhotosUrls = [];
         const photos = Array.isArray(data.personal_photos_url) ? data.personal_photos_url : [data.personal_photos_url];
         for (let i = 0; i < photos.length; i++) {
@@ -48,7 +56,13 @@ exports.registerCandidate = async (req, res) => {
             if (url) personalPhotosUrls.push(url);
         }
 
-        const fileFields = ['national_id_card_url', 'education_url', 'military_service_url', 'financial_disclosure_url', 'birth_certificate_url', 'fitness_health_url', 'criminal_record_url', 'deposit_receipt_url', 'election_symbol_url', 'party_card_url'];
+        // معالجة باقي المستندات الإلزامية والاختيارية
+        const fileFields = [
+            'national_id_card_url', 'education_url', 'military_service_url', 
+            'financial_disclosure_url', 'birth_certificate_url', 'fitness_health_url', 
+            'criminal_record_url', 'deposit_receipt_url', 'election_symbol_url', 'party_card_url'
+        ];
+        
         let uploadedUrls = {};
         for (const field of fileFields) {
             uploadedUrls[field] = data[field] ? await processBase64AndUpload(data[field], `${field}_${data.national_id}_${Date.now()}.jpg`) : null;
@@ -56,6 +70,7 @@ exports.registerCandidate = async (req, res) => {
 
         const hashedPassword = await bcrypt.hash(data.password, 10);
         
+        // استعلام الإدخال المباشر (21 حقل)
         const query = `
             INSERT INTO candidates (
                 national_id, email, password, phone_numbers, short_bio, 
@@ -80,20 +95,19 @@ exports.registerCandidate = async (req, res) => {
 
         res.status(201).json({ success: true, message: "تم تسجيل طلب الترشح بنجاح" });
     } catch (err) {
-        console.error("Reg Error:", err);
+        console.error("Registration Error:", err);
+        if (err.code === '23505') return res.status(400).json({ success: false, message: "هذا الرقم القومي أو البريد مسجل مسبقاً" });
         res.status(500).json({ success: false, message: `خطأ فني: ${err.message}` });
     }
 };
 
-// --- تسجيل دخول المرشح ---
-// --- تسجيل دخول المرشح (دعم National ID أو Email) ---
-// --- تسجيل دخول المرشح (دعم Face ID أو Email/Password) ---
+// --- 2. تسجيل دخول المرشح (دعم Face ID أو Email/Password) ---
 exports.loginCandidate = async (req, res) => {
     try {
         const { national_id, email, password, isFaceAuth } = req.body;
         let candidate;
 
-        // 1. الدخول عبر التعرف على الوجه (يتم إرسال national_id و flag التأكيد)
+        // أ. الدخول عبر التعرف على الوجه
         if (isFaceAuth && national_id) {
             const result = await pool.query('SELECT * FROM candidates WHERE national_id = $1', [national_id]);
             candidate = result.rows[0];
@@ -101,26 +115,25 @@ exports.loginCandidate = async (req, res) => {
             if (!candidate) {
                 return res.status(404).json({ success: false, message: "الرقم القومي غير مسجل كمرشح" });
             }
-            // في حالة Face ID، نعتبر التحقق تم بنجاح من جهة الموبايل
         } 
         
-        // 2. الدخول التقليدي (Email + Password)
+        // ب. الدخول التقليدي بالبريد الإلكتروني
         else if (email && password) {
             const result = await pool.query('SELECT * FROM candidates WHERE email = $1', [email]);
             candidate = result.rows[0];
 
             if (!candidate || !(await bcrypt.compare(password, candidate.password))) {
-                return res.status(401).json({ success: false, message: "بيانات الدخول غير صحيحة" });
+                return res.status(401).json({ success: false, message: "البريد الإلكتروني أو كلمة المرور غير صحيحة" });
             }
         }
 
-        // 3. الدخول التقليدي (National ID + Password)
+        // ج. الدخول التقليدي بالرقم القومي وكلمة المرور
         else if (national_id && password) {
             const result = await pool.query('SELECT * FROM candidates WHERE national_id = $1', [national_id]);
             candidate = result.rows[0];
 
             if (!candidate || !(await bcrypt.compare(password, candidate.password))) {
-                return res.status(401).json({ success: false, message: "بيانات الدخول غير صحيحة" });
+                return res.status(401).json({ success: false, message: "الرقم القومي أو كلمة المرور غير صحيحة" });
             }
         } 
         
@@ -141,7 +154,8 @@ exports.loginCandidate = async (req, res) => {
             data: { 
                 id: candidate.candidate_id, 
                 email: candidate.email,
-                national_id: candidate.national_id
+                national_id: candidate.national_id,
+                candidate_type: candidate.candidate_type
             } 
         });
 
@@ -150,12 +164,14 @@ exports.loginCandidate = async (req, res) => {
         res.status(500).json({ success: false, message: "خطأ في السيرفر أثناء تسجيل الدخول" });
     }
 };
-// --- عرض القائمة ---
+
+// --- 3. عرض قائمة المرشحين ---
 exports.listCandidates = async (req, res) => {
     try {
-        const result = await pool.query('SELECT candidate_id, national_id, email, occupation FROM candidates');
+        const result = await pool.query('SELECT candidate_id, national_id, email, occupation, candidate_type FROM candidates ORDER BY created_at DESC');
         res.json({ success: true, data: result.rows });
     } catch (err) {
+        console.error("List Error:", err);
         res.status(500).json({ success: false, message: "خطأ في تحميل القائمة" });
     }
 };

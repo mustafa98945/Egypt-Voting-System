@@ -1,21 +1,7 @@
 const pool = require('../config/db');
 
 class Candidate {
-    // دالة البحث بالرقم القومي (تستخدم مع الـ Face Recognition)
-    static async findByNationalId(nationalId) {
-        const query = 'SELECT * FROM candidates WHERE national_id = $1';
-        const { rows } = await pool.query(query, [nationalId]);
-        return rows[0];
-    }
-
-    // دالة البحث بالإيميل (للدخول التقليدي)
-    static async findByEmail(email) {
-        const query = 'SELECT * FROM candidates WHERE email = $1';
-        const { rows } = await pool.query(query, [email]);
-        return rows[0];
-    }
-
-    // دالة الإنشاء (اللي فيها الـ 21 حقل)
+    // دالة إنشاء مرشح جديد
     static async create(data) {
         const query = `
             INSERT INTO candidates (
@@ -28,16 +14,25 @@ class Candidate {
             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
             RETURNING *;
         `;
+
         const values = [
-            data.national_id, data.email, data.password, 
-            data.phone_numbers, data.short_bio, data.candidate_type, 
-            data.occupation, data.degree, data.birth_date, data.expiry_date,
-            data.personal_photos_url, data.national_id_card_url, data.education_url, 
-            data.military_service_url, data.financial_disclosure_url, data.birth_certificate_url, 
-            data.fitness_health_url, data.criminal_record_url, data.deposit_receipt_url, 
-            data.election_symbol_url, data.party_card_url
+            data.national_id, data.email, data.password, data.phone_numbers,
+            data.short_bio, data.candidate_type, data.occupation, data.degree,
+            data.birth_date, data.expiry_date, data.personal_photos_url,
+            data.national_id_card_url, data.education_url, data.military_service_url,
+            data.financial_disclosure_url, data.birth_certificate_url, data.fitness_health_url,
+            data.criminal_record_url, data.deposit_receipt_url, data.election_symbol_url,
+            data.party_card_url
         ];
+
         const { rows } = await pool.query(query, values);
+        return rows[0];
+    }
+
+    // دالة البحث بالرقم القومي (للدخول بالوجه أو العادي)
+    static async findByNationalId(nationalId) {
+        const query = 'SELECT * FROM candidates WHERE national_id = $1';
+        const { rows } = await pool.query(query, [nationalId]);
         return rows[0];
     }
 }
