@@ -1,134 +1,56 @@
-const Candidate = require('../models/candidateModel');
-const Voter = require('../models/voterModel');
-const bcrypt = require('bcrypt');
-const jwt = require('jsonwebtoken');
-const sharp = require('sharp');
-const { uploadToSupabase } = require('../utils/supabaseHelper');
+const pool = require('../config/db');
 
-// --- دالة مساعدة لتحويل الـ Base64 إلى Buffer ورفعه ---
-const processBase64AndUpload = async (base64String, fileName, folder = 'candidates') => {
-    try {
-        if (!base64String) return null;
+class Candidate {
+    // 1. دالة إنشاء مرشح جديد
+    // ملاحظة: لو بتستخدم pool.query مباشرة في الكنترولر، الدالة دي اختيارية
+    // بس يفضل تكون موجودة كمرجع
+    static async create(data) {
+        const query = `
+            INSERT INTO candidates (
+                national_id, email, password, phone_numbers, short_bio, 
+                candidate_type, occupation, degree, birth_date, expiry_date,
+                personal_photos_url, national_id_card_url, education_url, 
+                military_service_url, financial_disclosure_url, birth_certificate_url, 
+                fitness_health_url, criminal_record_url, deposit_receipt_url, 
+                election_symbol_url, party_card_url
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
+            RETURNING *;
+        `;
 
-        // 1. تنظيف نص الـ Base64 (إزالة الجزء التعريفي لو وجد)
-        const base64Data = base64String.replace(/^data:image\/\w+;base64,/, "");
-        const buffer = Buffer.from(base64Data, 'base64');
+        const values = [
+            data.national_id, data.email, data.password, 
+            data.phone_numbers, data.short_bio, data.candidate_type, 
+            data.occupation, data.degree, data.birth_date, data.expiry_date,
+            data.personal_photos_url, data.national_id_card_url, data.education_url, 
+            data.military_service_url, data.financial_disclosure_url, data.birth_certificate_url, 
+            data.fitness_health_url, data.criminal_record_url, data.deposit_receipt_url, 
+            data.election_symbol_url, data.party_card_url
+        ];
 
-        // 2. معالجة الصورة باستخدام Sharp (تقليل الحجم والجودة لضمان السرعة)
-        const optimized = await sharp(buffer)
-            .resize({ width: 800, withoutEnlargement: true }) // تقليل العرض لسرعة الرفع
-            .jpeg({ quality: 70 }) // جودة متوازنة
-            .toBuffer();
-            
-        // 3. الرفع لـ Supabase
-        return await uploadToSupabase(optimized, fileName, folder);
-    } catch (error) {
-        console.error(`Error processing file ${fileName}:`, error);
-        throw new Error(`فشل في معالجة المستند: ${fileName}`);
+        const { rows } = await pool.query(query, values);
+        return rows[0];
     }
-};
 
-exports.registerCandidate = async (req, res) => {
-    try {
-        const data = req.body; // البيانات الآن تأتي كلها من الـ Body كـ JSON
-
-        // 1. التحقق من الحقول النصية (11 حقل)
-        const requiredTextFields = [
-            'national_id', 'birth_date', 'expiry_date', 'email', 
-            'password', 'confirm_password', 'candidate_type', 
-            'occupation', 'degree', 'phone_numbers', 'short_bio'
-        ];
-        
-        for (const field of requiredTextFields) {
-            if (!data[field]) {
-                return res.status(400).json({ 
-                    success: false, 
-                    message: `الحقل (${field}) مطلوب` 
-                });
-            }
-        }
-
-        if (data.password !== data.confirm_password) {
-            return res.status(400).json({ success: false, message: "كلمات المرور غير متطابقة" });
-        }
-
-        // 2. التحقق من وجود نصوص الصور (Base64 Strings) - الـ 10 مستندات الإجبارية
-        const mandatoryFiles = [
-            'personal_photos_url', 'national_id_card_url', 'education_url', 
-            'military_service_url', 'financial_disclosure_url', 'birth_certificate_url', 
-            'fitness_health_url', 'criminal_record_url', 'deposit_receipt_url', 
-            'election_symbol_url'
-        ];
-
-        for (const field of mandatoryFiles) {
-            if (!data[field]) {
-                return res.status(400).json({ 
-                    success: false, 
-                    message: `يجب إرسال صورة: (${field}) بصيغة نصية (Base64)` 
-                });
-            }
-        }
-
-        // 3. التحقق من السجل المدني
-        const citizen = await Voter.verifyInRegistry(data.national_id, data.birth_date, data.expiry_date);
-        if (!citizen) {
-            return res.status(401).json({ success: false, message: "بيانات الهوية غير مطابقة للسجل المدني" });
-        }
-
-        // 4. معالجة الصور الشخصية (مصفوفة نصوص Base64)
-        let personalPhotosUrls = [];
-        const photos = Array.isArray(data.personal_photos_url) ? data.personal_photos_url : [data.personal_photos_url];
-        
-        for (let i = 0; i < photos.length; i++) {
-            const url = await processBase64AndUpload(
-                photos[i], 
-                `personal_${data.national_id}_${Date.now()}_${i}.jpg`
-            );
-            personalPhotosUrls.push(url);
-        }
-
-        // 5. معالجة باقي المستندات
-        const fileFields = [
-            'national_id_card_url', 'education_url', 'military_service_url',
-            'financial_disclosure_url', 'birth_certificate_url', 'fitness_health_url',
-            'criminal_record_url', 'deposit_receipt_url', 'election_symbol_url',
-            'party_card_url'
-        ];
-
-        let uploadedUrls = {};
-        for (const field of fileFields) {
-            if (data[field]) {
-                uploadedUrls[field] = await processBase64AndUpload(
-                    data[field], 
-                    `${field}_${data.national_id}_${Date.now()}.jpg`
-                );
-            } else {
-                uploadedUrls[field] = null;
-            }
-        }
-
-        // 6. تشفير كلمة المرور
-        const hashedPassword = await bcrypt.hash(data.password, 10);
-
-        // 7. حفظ البيانات النهائية
-        const newCandidate = await Candidate.create({
-            ...data,
-            password: hashedPassword,
-            phone_numbers: Array.isArray(data.phone_numbers) ? data.phone_numbers : [data.phone_numbers],
-            personal_photos_url: personalPhotosUrls,
-            ...uploadedUrls
-        });
-
-        res.status(201).json({ 
-            success: true, 
-            message: "تم استقبال ومعالجة طلب الترشح بنجاح" 
-        });
-
-    } catch (err) {
-        console.error("Critical Registration Error:", err);
-        if (err.code === '23505') {
-            return res.status(400).json({ success: false, message: "البيانات مسجلة مسبقاً" });
-        }
-        res.status(500).json({ success: false, message: "حدث خطأ فني أثناء الرفع والمعالجة" });
+    // 2. البحث عن مرشح بالرقم القومي (مهمة جداً للـ Login)
+    static async findByNationalId(nationalId) {
+        const query = 'SELECT * FROM candidates WHERE national_id = $1';
+        const { rows } = await pool.query(query, [nationalId]);
+        return rows[0];
     }
-};
+
+    // 3. البحث عن مرشح بالإيميل
+    static async findByEmail(email) {
+        const query = 'SELECT * FROM candidates WHERE email = $1';
+        const { rows } = await pool.query(query, [email]);
+        return rows[0];
+    }
+
+    // 4. جلب كل المرشحين (للقائمة)
+    static async getAll() {
+        const query = 'SELECT candidate_id, national_id, email, occupation, candidate_type FROM candidates ORDER BY created_at DESC';
+        const { rows } = await pool.query(query);
+        return rows;
+    }
+}
+
+module.exports = Candidate;
