@@ -5,10 +5,7 @@ const sharp = require('sharp');
 const jwt = require('jsonwebtoken');
 const { uploadToSupabase } = require('../utils/supabaseHelper');
 
-/**
- * دالة مساعدة مطورة لمعالجة الـ Base64
- * تقوم بتنظيف النص، محاولة ضغطه بـ Sharp، وفي حالة الفشل ترفعه كملف خام
- */
+// --- دالة مساعدة لمعالجة الـ Base64 ورفعها ---
 const processBase64AndUpload = async (base64String, fileName, folder = 'candidates') => {
     try {
         if (!base64String || typeof base64String !== 'string') return null;
@@ -20,104 +17,81 @@ const processBase64AndUpload = async (base64String, fileName, folder = 'candidat
         // 2. تحويل النص لـ Buffer
         const buffer = Buffer.from(actualBase64, 'base64');
 
-        if (buffer.length === 0) {
-            throw new Error('الـ Buffer الناتج من الصورة فارغ');
-        }
+        if (buffer.length === 0) return null;
 
         try {
-            // 3. محاولة معالجة الصورة باستخدام Sharp
+            // 3. محاولة ضغط الصورة باستخدام Sharp لتقليل الحجم
             const optimized = await sharp(buffer)
-                .rotate() // تعديل اتجاه الصورة التلقائي
+                .rotate() // تعديل الاتجاه تلقائياً
                 .jpeg({ quality: 75, chromaSubsampling: '4:2:0' }) 
                 .toBuffer();
             
-            // 4. الرفع لـ Supabase بعد الضغط
-            console.log(`تم ضغط ورفع الملف بنجاح: ${fileName}`);
+            console.log(`[Success] تم معالجة ورفع: ${fileName}`);
             return await uploadToSupabase(optimized, fileName, folder);
         } catch (sharpError) {
-            // 5. خطة الإنقاذ: لو Sharp فشل (بسبب فورمات غير مدعوم)، ارفع الملف الأصلي مباشرة
-            console.error(`[Sharp Warning] فشل الضغط، محاولة رفع الأصل لـ ${fileName}:`, sharpError.message);
+            // 4. خطة بديلة: لو Sharp فشل، ارفع الملف الأصلي كما هو
+            console.warn(`[Sharp Warning] فشل الضغط، يتم رفع الأصل لـ ${fileName}:`, sharpError.message);
             return await uploadToSupabase(buffer, fileName, folder);
         }
     } catch (error) {
         console.error(`[Upload Error] خطأ فادح في ${fileName}:`, error.message);
-        throw new Error(`فشل في معالجة الملف: ${fileName} - ${error.message}`);
+        throw new Error(`فشل في معالجة الملف: ${fileName}`);
     }
 };
 
-// 1. تسجيل مرشح جديد (JSON Mode)
+// 1. تسجيل مرشح جديد
 exports.registerCandidate = async (req, res) => {
     try {
         const { 
             national_id, birth_date, expiry_date, email, password, confirm_password,
             phone_numbers, short_bio, candidate_type, occupation, degree,
-            personal_photos_url, 
-            national_id_card_url, education_url, military_service_url,
+            personal_photos_url, national_id_card_url, education_url, military_service_url,
             financial_disclosure_url, birth_certificate_url, fitness_health_url,
-            criminal_record_url, deposit_receipt_url, election_symbol_url,
-            party_card_url 
+            criminal_record_url, deposit_receipt_url, election_symbol_url, party_card_url 
         } = req.body;
 
-        // 1. التحقق من الحقول النصية الأساسية
-        const requiredTextFields = [
-            'national_id', 'birth_date', 'expiry_date', 'email', 
-            'password', 'confirm_password', 'candidate_type', 'occupation', 'degree',
-            'phone_numbers', 'short_bio'
-        ];
-        
-        for (const field of requiredTextFields) {
-            if (!req.body[field]) {
-                return res.status(400).json({ success: false, message: `الحقل (${field}) مطلوب` });
-            }
-        }
-
+        // التحقق من كلمة المرور
         if (password !== confirm_password) {
             return res.status(400).json({ success: false, message: "كلمات المرور غير متطابقة" });
         }
 
-        // 2. التحقق من السجل المدني
+        // التحقق من السجل المدني (Voter Registry)
         const citizen = await Voter.verifyInRegistry(national_id, birth_date, expiry_date);
         if (!citizen) {
             return res.status(401).json({ success: false, message: "بيانات الهوية غير مطابقة للسجل المدني" });
         }
 
-        // 3. معالجة الصور الشخصية (مصفوفة أو نص واحد)
+        // معالجة الصور الشخصية
         let personalPhotosUrls = [];
         if (personal_photos_url) {
             const photosArray = Array.isArray(personal_photos_url) ? personal_photos_url : [personal_photos_url];
             for (let i = 0; i < photosArray.length; i++) {
-                const url = await processBase64AndUpload(
-                    photosArray[i], 
-                    `personal_${national_id}_${Date.now()}_${i}.jpg`
-                );
+                const url = await processBase64AndUpload(photosArray[i], `personal_${national_id}_${i}_${Date.now()}.jpg`);
                 if (url) personalPhotosUrls.push(url);
             }
         }
 
-        // 4. معالجة باقي الملفات والشهادات
+        // معالجة باقي الملفات والشهادات
         const fileFields = [
             'national_id_card_url', 'education_url', 'military_service_url',
             'financial_disclosure_url', 'birth_certificate_url', 'fitness_health_url',
-            'criminal_record_url', 'deposit_receipt_url', 'election_symbol_url',
-            'party_card_url'
+            'criminal_record_url', 'deposit_receipt_url', 'election_symbol_url', 'party_card_url'
         ];
 
         let uploadedFiles = {};
         for (const field of fileFields) {
             if (req.body[field]) {
-                uploadedFiles[field] = await processBase64AndUpload(
-                    req.body[field], 
-                    `${field}_${national_id}_${Date.now()}.jpg`
-                );
+                uploadedFiles[field] = await processBase64AndUpload(req.body[field], `${field}_${national_id}_${Date.now()}.jpg`);
             } else {
                 uploadedFiles[field] = null;
             }
         }
 
-        // 5. التشفير والحفظ في قاعدة البيانات
+        // تشفير كلمة المرور
         const hashedPassword = await bcrypt.hash(password, 10);
         
-        await Candidate.create({
+        // تجميع بيانات المرشح
+        const candidateData = {
             national_id, 
             email, 
             password: hashedPassword,
@@ -130,22 +104,22 @@ exports.registerCandidate = async (req, res) => {
             expiry_date,
             personal_photos_url: personalPhotosUrls,
             ...uploadedFiles
-        });
+        };
+
+        // --- التعديل الجوهري: استخدام register بدلاً من create ---
+        await Candidate.register(candidateData); 
 
         res.status(201).json({ 
             success: true, 
-            message: "تم تسجيل طلب الترشح بنجاح، وسيتم مراجعته من قبل اللجنة." 
+            message: "تم تسجيل طلب الترشح بنجاح، سيتم مراجعته قريباً." 
         });
 
     } catch (err) {
-        console.error("Critical Registration Error:", err);
+        console.error("Registration Error:", err);
         if (err.code === '23505') {
             return res.status(400).json({ success: false, message: "هذا الرقم القومي أو البريد الإلكتروني مسجل مسبقاً" });
         }
-        res.status(500).json({ 
-            success: false, 
-            message: err.message.includes("فشل في معالجة الملف") ? err.message : "خطأ في السيرفر أثناء معالجة الطلب" 
-        });
+        res.status(500).json({ success: false, message: "خطأ في السيرفر أثناء معالجة الطلب" });
     }
 };
 
@@ -181,16 +155,15 @@ exports.loginCandidate = async (req, res) => {
             }
         });
     } catch (err) {
-        console.error("Login Error:", err);
         res.status(500).json({ success: false, message: "خطأ في السيرفر أثناء تسجيل الدخول" });
     }
 };
 
-// 3. عرض قائمة المرشحين بناءً على المحافظة
+// 3. عرض قائمة المرشحين
 exports.listCandidates = async (req, res) => {
     const { governorate } = req.query;
     if (!governorate) {
-        return res.status(400).json({ success: false, message: "يجب تحديد المحافظة لعرض المرشحين" });
+        return res.status(400).json({ success: false, message: "يجب تحديد المحافظة" });
     }
     try {
         const candidates = await Candidate.getAllByGovernorate(governorate);
@@ -200,7 +173,6 @@ exports.listCandidates = async (req, res) => {
             data: candidates
         });
     } catch (err) {
-        console.error("List Candidates Error:", err);
         res.status(500).json({ success: false, message: "خطأ في تحميل قائمة المرشحين" });
     }
 };
