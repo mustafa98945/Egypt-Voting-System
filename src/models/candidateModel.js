@@ -1,9 +1,10 @@
 const pool = require('../config/db');
 
 class Candidate {
-    // 1. دالة إنشاء مرشح جديد
-    // ملاحظة: لو بتستخدم pool.query مباشرة في الكنترولر، الدالة دي اختيارية
-    // بس يفضل تكون موجودة كمرجع
+    /**
+     * إنشاء سجل مرشح جديد في قاعدة البيانات
+     * @param {Object} data - يحتوي على كل بيانات المرشح والروابط المرفوعة
+     */
     static async create(data) {
         const query = `
             INSERT INTO candidates (
@@ -18,38 +19,40 @@ class Candidate {
         `;
 
         const values = [
-            data.national_id, data.email, data.password, 
-            data.phone_numbers, data.short_bio, data.candidate_type, 
-            data.occupation, data.degree, data.birth_date, data.expiry_date,
-            data.personal_photos_url, data.national_id_card_url, data.education_url, 
-            data.military_service_url, data.financial_disclosure_url, data.birth_certificate_url, 
-            data.fitness_health_url, data.criminal_record_url, data.deposit_receipt_url, 
-            data.election_symbol_url, data.party_card_url
+            data.national_id, 
+            data.email, 
+            data.password, 
+            data.phone_numbers, 
+            data.short_bio, 
+            data.candidate_type, 
+            data.occupation, 
+            data.degree, 
+            data.birth_date, 
+            data.expiry_date,
+            data.personal_photos_url, 
+            data.national_id_card_url, 
+            data.education_url, 
+            data.military_service_url, 
+            data.financial_disclosure_url, 
+            data.birth_certificate_url, 
+            data.fitness_health_url, 
+            data.criminal_record_url, 
+            data.deposit_receipt_url, 
+            data.election_symbol_url, 
+            data.party_card_url
         ];
 
         const { rows } = await pool.query(query, values);
         return rows[0];
     }
 
-    // 2. البحث عن مرشح بالرقم القومي (مهمة جداً للـ Login)
+    /**
+     * البحث عن مرشح بواسطة الرقم القومي (مهم لعملية تسجيل الدخول)
+     */
     static async findByNationalId(nationalId) {
         const query = 'SELECT * FROM candidates WHERE national_id = $1';
         const { rows } = await pool.query(query, [nationalId]);
         return rows[0];
-    }
-
-    // 3. البحث عن مرشح بالإيميل
-    static async findByEmail(email) {
-        const query = 'SELECT * FROM candidates WHERE email = $1';
-        const { rows } = await pool.query(query, [email]);
-        return rows[0];
-    }
-
-    // 4. جلب كل المرشحين (للقائمة)
-    static async getAll() {
-        const query = 'SELECT candidate_id, national_id, email, occupation, candidate_type FROM candidates ORDER BY created_at DESC';
-        const { rows } = await pool.query(query);
-        return rows;
     }
 }
 
