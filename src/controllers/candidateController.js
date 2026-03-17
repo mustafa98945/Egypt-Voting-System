@@ -86,23 +86,70 @@ exports.registerCandidate = async (req, res) => {
 };
 
 // --- تسجيل دخول المرشح ---
+// --- تسجيل دخول المرشح (دعم National ID أو Email) ---
+// --- تسجيل دخول المرشح (دعم Face ID أو Email/Password) ---
 exports.loginCandidate = async (req, res) => {
     try {
-        const { national_id, password } = req.body;
-        const result = await pool.query('SELECT * FROM candidates WHERE national_id = $1', [national_id]);
-        const candidate = result.rows[0];
+        const { national_id, email, password, isFaceAuth } = req.body;
+        let candidate;
 
-        if (!candidate || !(await bcrypt.compare(password, candidate.password))) {
-            return res.status(401).json({ success: false, message: "البيانات غير صحيحة" });
+        // 1. الدخول عبر التعرف على الوجه (يتم إرسال national_id و flag التأكيد)
+        if (isFaceAuth && national_id) {
+            const result = await pool.query('SELECT * FROM candidates WHERE national_id = $1', [national_id]);
+            candidate = result.rows[0];
+            
+            if (!candidate) {
+                return res.status(404).json({ success: false, message: "الرقم القومي غير مسجل كمرشح" });
+            }
+            // في حالة Face ID، نعتبر التحقق تم بنجاح من جهة الموبايل
+        } 
+        
+        // 2. الدخول التقليدي (Email + Password)
+        else if (email && password) {
+            const result = await pool.query('SELECT * FROM candidates WHERE email = $1', [email]);
+            candidate = result.rows[0];
+
+            if (!candidate || !(await bcrypt.compare(password, candidate.password))) {
+                return res.status(401).json({ success: false, message: "بيانات الدخول غير صحيحة" });
+            }
         }
 
-        const token = jwt.sign({ id: candidate.candidate_id, role: 'candidate' }, process.env.JWT_SECRET, { expiresIn: '24h' });
-        res.json({ success: true, token, data: { id: candidate.candidate_id, email: candidate.email } });
+        // 3. الدخول التقليدي (National ID + Password)
+        else if (national_id && password) {
+            const result = await pool.query('SELECT * FROM candidates WHERE national_id = $1', [national_id]);
+            candidate = result.rows[0];
+
+            if (!candidate || !(await bcrypt.compare(password, candidate.password))) {
+                return res.status(401).json({ success: false, message: "بيانات الدخول غير صحيحة" });
+            }
+        } 
+        
+        else {
+            return res.status(400).json({ success: false, message: "يرجى تقديم بيانات تسجيل دخول كاملة" });
+        }
+
+        // إنشاء التوكن (JWT)
+        const token = jwt.sign(
+            { id: candidate.candidate_id, role: 'candidate' }, 
+            process.env.JWT_SECRET, 
+            { expiresIn: '24h' }
+        );
+
+        res.status(200).json({ 
+            success: true, 
+            token, 
+            data: { 
+                id: candidate.candidate_id, 
+                email: candidate.email,
+                national_id: candidate.national_id
+            } 
+        });
+
     } catch (err) {
-        res.status(500).json({ success: false, message: "خطأ في الدخول" });
+        console.error("Login Error:", err);
+        res.status(500).json({ success: false, message: "خطأ في السيرفر أثناء تسجيل الدخول" });
     }
 };
-
 // --- عرض القائمة ---
 exports.listCandidates = async (req, res) => {
     try {
