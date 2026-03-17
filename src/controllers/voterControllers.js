@@ -49,10 +49,6 @@ exports.registerVoter = async (req, res) => {
             party_card_url // استلامه كـ Base64 String
         } = req.body;
         
-        // التحقق من تطابق كلمة المرور
-        if (password !== confirm_password) {
-            return res.status(400).json({ success: false, message: "كلمات المرور غير متطابقة" });
-        }
 
         // التحقق من الهوية في السجل المدني
         const citizen = await Voter.verifyInRegistry(national_id, birth_date, expiry_date);
