@@ -1,25 +1,31 @@
 const Voter = require('../models/voterModel');
 const bcrypt = require('bcrypt');
 const sharp = require('sharp');
-const jwt = require('jsonwebtoken'); // إضافة JWT
+const jwt = require('jsonwebtoken');
 const { uploadToSupabase } = require('../utils/supabaseHelper');
 
-// --- دالة مساعدة لمعالجة الصور ---
-const processAndUpload = async (fileBuffer, fileName, folder = 'voters', width = 1000, quality = 80) => {
+// --- دالة مساعدة لتحويل Base64 إلى Buffer ورفعه (Fast Processing) ---
+const processBase64AndUpload = async (base64String, fileName, folder = 'voters') => {
     try {
-        const optimized = await sharp(fileBuffer)
-            .resize({ width, withoutEnlargement: true })
-            .jpeg({ quality })
+        if (!base64String) return null;
+
+        // إزالة الجزء التعريفي من الـ Base64 لو وجد
+        const base64Data = base64String.replace(/^data:image\/\w+;base64,/, "");
+        const buffer = Buffer.from(base64Data, 'base64');
+
+        // معالجة الصورة باستخدام Sharp لضمان الجودة والحجم
+        const optimized = await sharp(buffer)
+            .jpeg({ quality: 75 })
             .toBuffer();
             
         return await uploadToSupabase(optimized, fileName, folder);
     } catch (error) {
-        console.error(`خطأ في معالجة الملف ${fileName}:`, error);
-        throw new Error("فشل في معالجة صورة الناخب");
+        console.error(`خطأ في معالجة Base64 للملف ${fileName}:`, error);
+        throw new Error("فشل في معالجة ورفع الصورة");
     }
 };
 
-// 1. التحقق قبل التسجيل (لا يحتاج لتعديل)
+// 1. التحقق المبدئي (يبقى كما هو لأنه يعتمد على نصوص فقط)
 exports.verifyBeforeRegister = async (req, res) => {
     const { national_id, birth_date, expiry_date } = req.body;
     try {
@@ -34,29 +40,31 @@ exports.verifyBeforeRegister = async (req, res) => {
     }
 };
 
-// 2. تسجيل الحساب للناخب
+// 2. تسجيل حساب الناخب (JSON Mode)
 exports.registerVoter = async (req, res) => {
     try {
         const { 
             national_id, birth_date, expiry_date, email, 
-            password, confirm_password 
+            password, confirm_password,
+            party_card_url // استلامه كـ Base64 String
         } = req.body;
         
+        // التحقق من تطابق كلمة المرور
         if (password !== confirm_password) {
             return res.status(400).json({ success: false, message: "كلمات المرور غير متطابقة" });
         }
 
+        // التحقق من الهوية في السجل المدني
         const citizen = await Voter.verifyInRegistry(national_id, birth_date, expiry_date);
         if (!citizen) {
             return res.status(401).json({ success: false, message: "بيانات الهوية غير مطابقة للسجل المدني" });
         }
 
-        // --- معالجة الرفع (اختياري) ---
-        let partyCardUrl = null;
-        if (req.files && req.files['party_card_url']) {
-            const file = req.files['party_card_url'][0];
-            partyCardUrl = await processAndUpload(
-                file.buffer, 
+        // --- معالجة الكارنيه الحزبي لو موجود (Base64 to Supabase) ---
+        let finalPartyCardUrl = null;
+        if (party_card_url) {
+            finalPartyCardUrl = await processBase64AndUpload(
+                party_card_url, 
                 `voter_card_${national_id}_${Date.now()}.jpg`
             );
         }
@@ -67,29 +75,34 @@ exports.registerVoter = async (req, res) => {
             national_id, 
             email, 
             password: hashedPassword, 
-            party_card_url: partyCardUrl 
+            party_card_url: finalPartyCardUrl 
         });
         
-        res.status(201).json({ success: true, message: "تم إنشاء حسابك بنجاح" });
+        res.status(201).json({ 
+            success: true, 
+            message: "تم إنشاء حسابك بنجاح باستخدام المعالجة السريعة" 
+        });
 
     } catch (err) {
         if (err.code === '23505') {
             return res.status(400).json({ success: false, message: "هذا الحساب مسجل بالفعل" });
         }
         console.error("Voter Registration Error:", err.message);
-        res.status(500).json({ success: false, message: "حدث خطأ في السيرفر" });
+        res.status(500).json({ success: false, message: "حدث خطأ في السيرفر أثناء التسجيل" });
     }
 };
 
-// 3. تسجيل الدخول (تم إضافة التوكن)
+// 3. تسجيل الدخول (JWT)
 exports.login = async (req, res) => {
     const { email, password, national_id_from_face } = req.body;
     try {
         let user;
 
         if (national_id_from_face) {
+            // الدخول ببصمة الوجه
             user = await Voter.findByIdentifier(national_id_from_face, true);
         } else {
+            // الدخول التقليدي بالبريد
             user = await Voter.findByIdentifier(email, false);
             if (user) {
                 const isMatch = await bcrypt.compare(password, user.password);
@@ -99,7 +112,7 @@ exports.login = async (req, res) => {
 
         if (!user) return res.status(401).json({ success: false, message: "بيانات الدخول غير صحيحة" });
 
-        // --- توليد التوكن (JWT) ---
+        // توليد التوكن
         const token = jwt.sign(
             { voter_id: user.voter_id, national_id: user.national_id },
             process.env.JWT_SECRET,
@@ -108,7 +121,7 @@ exports.login = async (req, res) => {
 
         res.json({ 
             success: true, 
-            token, // نرسل التوكن للفرونت إند
+            token, 
             user_data: { 
                 voter_id: user.voter_id, 
                 full_name: user.full_name, 
@@ -118,6 +131,7 @@ exports.login = async (req, res) => {
             } 
         });
     } catch (err) {
-        res.status(500).json({ success: false, message: "حدث خطأ في السيرفر" });
+        console.error("Login Error:", err);
+        res.status(500).json({ success: false, message: "حدث خطأ في السيرفر أثناء تسجيل الدخول" });
     }
 };
