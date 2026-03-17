@@ -8,15 +8,19 @@ const { uploadToSupabase } = require('../utils/supabaseHelper');
 // --- دالة مساعدة لتحويل Base64 إلى Buffer ومعالجته ---
 const processBase64AndUpload = async (base64String, fileName, folder = 'candidates') => {
     try {
-        if (!base64String) return null;
+        if (!base64String || typeof base64String !== 'string') return null;
 
-        // 1. فك تشفير الـ Base64 وتحويله لـ Buffer
-        // نستخدم regex لإزالة الجزء التعريفي مثل data:image/jpeg;base64, لو وجد
+        // 1. تنظيف الـ Base64 وفك التشفير
+        // السطر ده بيشيل أي زيادات زي data:image/png;base64,
         const base64Data = base64String.replace(/^data:image\/\w+;base64,/, "");
         const buffer = Buffer.from(base64Data, 'base64');
 
-        // 2. معالجة سريعة للتأكد من الصيغة (بما أن الفلاتر قام بالضغط)
-        // نقوم فقط بتحويله لـ jpeg لتوحيد الامتدادات
+        // التأكد إن الـ buffer مش فاضي
+        if (buffer.length === 0) {
+            throw new Error('الـ Buffer الناتج من الصورة فارغ');
+        }
+
+        // 2. معالجة الصورة باستخدام Sharp
         const optimized = await sharp(buffer)
             .jpeg({ quality: 80 }) 
             .toBuffer();
@@ -24,8 +28,8 @@ const processBase64AndUpload = async (base64String, fileName, folder = 'candidat
         // 3. الرفع لـ Supabase
         return await uploadToSupabase(optimized, fileName, folder);
     } catch (error) {
-        console.error(`خطأ في معالجة الملف Base64 (${fileName}):`, error);
-        throw new Error(`فشل في معالجة الملف: ${fileName}`);
+        console.error(`خطأ في معالجة الملف Base64 (${fileName}):`, error.message);
+        throw new Error(`فشل في معالجة الملف: ${fileName} - ${error.message}`);
     }
 };
 
@@ -35,8 +39,7 @@ exports.registerCandidate = async (req, res) => {
         const { 
             national_id, birth_date, expiry_date, email, password, confirm_password,
             phone_numbers, short_bio, candidate_type, occupation, degree,
-            // استلام الصور كـ Base64 من Body مباشرة
-            personal_photos_url, // مصفوفة نصوص base64
+            personal_photos_url, 
             national_id_card_url, education_url, military_service_url,
             financial_disclosure_url, birth_certificate_url, fitness_health_url,
             criminal_record_url, deposit_receipt_url, election_symbol_url,
@@ -60,7 +63,7 @@ exports.registerCandidate = async (req, res) => {
             return res.status(400).json({ success: false, message: "كلمات المرور غير متطابقة" });
         }
 
-        // 2. التحقق من وجود الملفات الإجبارية (بصيغة Base64 Strings)
+        // 2. التحقق من وجود الملفات الإجبارية
         const mandatoryFiles = [
             'personal_photos_url', 'national_id_card_url', 'education_url', 
             'military_service_url', 'financial_disclosure_url', 'birth_certificate_url', 
@@ -79,16 +82,16 @@ exports.registerCandidate = async (req, res) => {
             return res.status(401).json({ success: false, message: "بيانات الهوية غير مطابقة للسجل المدني" });
         }
 
-        // 4. معالجة الصور الشخصية (مصفوفة Base64)
+        // 4. معالجة الصور الشخصية (دعم مصفوفة أو نص واحد)
         let personalPhotosUrls = [];
-        if (Array.isArray(personal_photos_url)) {
-            for (let i = 0; i < personal_photos_url.length; i++) {
-                const url = await processBase64AndUpload(
-                    personal_photos_url[i], 
-                    `personal_${national_id}_${Date.now()}_${i}.jpg`
-                );
-                personalPhotosUrls.push(url);
-            }
+        const photosToProcess = Array.isArray(personal_photos_url) ? personal_photos_url : [personal_photos_url];
+        
+        for (let i = 0; i < photosToProcess.length; i++) {
+            const url = await processBase64AndUpload(
+                photosToProcess[i], 
+                `personal_${national_id}_${Date.now()}_${i}.jpg`
+            );
+            if (url) personalPhotosUrls.push(url);
         }
 
         // 5. معالجة باقي الملفات
@@ -139,11 +142,11 @@ exports.registerCandidate = async (req, res) => {
         if (err.code === '23505') {
             return res.status(400).json({ success: false, message: "بيانات مسجلة مسبقاً" });
         }
-        res.status(500).json({ success: false, message: "خطأ في السيرفر أثناء المعالجة" });
+        res.status(500).json({ success: false, message: `خطأ في السيرفر أثناء المعالجة: ${err.message}` });
     }
 };
 
-// 2. تسجيل الدخول (كما هو)
+// 2. تسجيل الدخول
 exports.loginCandidate = async (req, res) => {
     const { loginIdentifier, password } = req.body;
     try {
@@ -167,7 +170,7 @@ exports.loginCandidate = async (req, res) => {
         res.status(200).json({
             success: true,
             token,
-            message: `أهلاً بك يا ${candidate.full_name.split(' ')[0]}`,
+            message: `أهلاً بك يا ${candidate.full_name ? candidate.full_name.split(' ')[0] : 'مرشحنا'}`,
             data: {
                 id: candidate.candidate_id,
                 name: candidate.full_name,
@@ -179,7 +182,7 @@ exports.loginCandidate = async (req, res) => {
     }
 };
 
-// 3. عرض قائمة المرشحين (كما هو)
+// 3. عرض قائمة المرشحين
 exports.listCandidates = async (req, res) => {
     const { governorate } = req.query;
     if (!governorate) {
