@@ -4,37 +4,29 @@ const bcrypt = require('bcrypt');
 const sharp = require('sharp');
 const jwt = require('jsonwebtoken');
 const { uploadToSupabase } = require('../utils/supabaseHelper');
+const pool = require('../config/db'); // تأكد من استيراد اتصال قاعدة البيانات
 
-// --- دالة مساعدة لمعالجة الـ Base64 ورفعها ---
+// --- دالة معالجة الـ Base64 ورفعها ---
 const processBase64AndUpload = async (base64String, fileName, folder = 'candidates') => {
     try {
         if (!base64String || typeof base64String !== 'string') return null;
-
-        // 1. تنظيف الـ Base64 واستخراج البيانات الصافية
         const base64Parts = base64String.split(';base64,');
         const actualBase64 = base64Parts.length > 1 ? base64Parts[1] : base64Parts[0];
-
-        // 2. تحويل النص لـ Buffer
         const buffer = Buffer.from(actualBase64, 'base64');
-
         if (buffer.length === 0) return null;
 
         try {
-            // 3. محاولة ضغط الصورة باستخدام Sharp لتقليل الحجم
             const optimized = await sharp(buffer)
-                .rotate() // تعديل الاتجاه تلقائياً
+                .rotate()
                 .jpeg({ quality: 75, chromaSubsampling: '4:2:0' }) 
                 .toBuffer();
-            
             console.log(`[Success] تم معالجة ورفع: ${fileName}`);
             return await uploadToSupabase(optimized, fileName, folder);
         } catch (sharpError) {
-            // 4. خطة بديلة: لو Sharp فشل، ارفع الملف الأصلي كما هو
-            console.warn(`[Sharp Warning] فشل الضغط، يتم رفع الأصل لـ ${fileName}:`, sharpError.message);
+            console.warn(`[Sharp Warning] رفع الأصل لـ ${fileName}`);
             return await uploadToSupabase(buffer, fileName, folder);
         }
     } catch (error) {
-        console.error(`[Upload Error] خطأ فادح في ${fileName}:`, error.message);
         throw new Error(`فشل في معالجة الملف: ${fileName}`);
     }
 };
@@ -50,28 +42,25 @@ exports.registerCandidate = async (req, res) => {
             criminal_record_url, deposit_receipt_url, election_symbol_url, party_card_url 
         } = req.body;
 
-        // التحقق من كلمة المرور
         if (password !== confirm_password) {
             return res.status(400).json({ success: false, message: "كلمات المرور غير متطابقة" });
         }
 
-        // التحقق من السجل المدني (Voter Registry)
         const citizen = await Voter.verifyInRegistry(national_id, birth_date, expiry_date);
         if (!citizen) {
             return res.status(401).json({ success: false, message: "بيانات الهوية غير مطابقة للسجل المدني" });
         }
 
-        // معالجة الصور الشخصية
+        // معالجة الصور
         let personalPhotosUrls = [];
         if (personal_photos_url) {
             const photosArray = Array.isArray(personal_photos_url) ? personal_photos_url : [personal_photos_url];
             for (let i = 0; i < photosArray.length; i++) {
-                const url = await processBase64AndUpload(photosArray[i], `personal_${national_id}_${i}_${Date.now()}.jpg`);
+                const url = await processBase64AndUpload(photosArray[i], `personal_${national_id}_${Date.now()}_${i}.jpg`);
                 if (url) personalPhotosUrls.push(url);
             }
         }
 
-        // معالجة باقي الملفات والشهادات
         const fileFields = [
             'national_id_card_url', 'education_url', 'military_service_url',
             'financial_disclosure_url', 'birth_certificate_url', 'fitness_health_url',
@@ -80,46 +69,41 @@ exports.registerCandidate = async (req, res) => {
 
         let uploadedFiles = {};
         for (const field of fileFields) {
-            if (req.body[field]) {
-                uploadedFiles[field] = await processBase64AndUpload(req.body[field], `${field}_${national_id}_${Date.now()}.jpg`);
-            } else {
-                uploadedFiles[field] = null;
-            }
+            uploadedFiles[field] = req.body[field] ? await processBase64AndUpload(req.body[field], `${field}_${national_id}_${Date.now()}.jpg`) : null;
         }
 
-        // تشفير كلمة المرور
         const hashedPassword = await bcrypt.hash(password, 10);
         
-        // تجميع بيانات المرشح
-        const candidateData = {
-            national_id, 
-            email, 
-            password: hashedPassword,
-            phone_numbers: Array.isArray(phone_numbers) ? phone_numbers : [phone_numbers],
-            short_bio, 
-            candidate_type, 
-            occupation, 
-            degree,
-            birth_date, 
-            expiry_date,
-            personal_photos_url: personalPhotosUrls,
-            ...uploadedFiles
-        };
+        // --- الحل النهائي: إدخال البيانات مباشرة لضمان العمل ---
+        const query = `
+            INSERT INTO candidates (
+                national_id, email, password, phone_numbers, short_bio, 
+                candidate_type, occupation, degree, birth_date, expiry_date,
+                personal_photos_url, national_id_card_url, education_url, 
+                military_service_url, financial_disclosure_url, birth_certificate_url, 
+                fitness_health_url, criminal_record_url, deposit_receipt_url, 
+                election_symbol_url, party_card_url
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
+        `;
 
-        // --- التعديل الجوهري: استخدام register بدلاً من create ---
-        await Candidate.register(candidateData); 
+        const values = [
+            national_id, email, hashedPassword, 
+            Array.isArray(phone_numbers) ? phone_numbers : [phone_numbers],
+            short_bio, candidate_type, occupation, degree, birth_date, expiry_date,
+            personalPhotosUrls, uploadedFiles.national_id_card_url, uploadedFiles.education_url,
+            uploadedFiles.military_service_url, uploadedFiles.financial_disclosure_url,
+            uploadedFiles.birth_certificate_url, uploadedFiles.fitness_health_url,
+            uploadedFiles.criminal_record_url, uploadedFiles.deposit_receipt_url,
+            uploadedFiles.election_symbol_url, uploadedFiles.party_card_url
+        ];
 
-        res.status(201).json({ 
-            success: true, 
-            message: "تم تسجيل طلب الترشح بنجاح، سيتم مراجعته قريباً." 
-        });
+        await pool.query(query, values);
+
+        res.status(201).json({ success: true, message: "تم تسجيل طلب الترشح بنجاح" });
 
     } catch (err) {
-        console.error("Registration Error:", err);
-        if (err.code === '23505') {
-            return res.status(400).json({ success: false, message: "هذا الرقم القومي أو البريد الإلكتروني مسجل مسبقاً" });
-        }
-        res.status(500).json({ success: false, message: "خطأ في السيرفر أثناء معالجة الطلب" });
+        console.error("Final Registration Error:", err);
+        res.status(500).json({ success: false, message: "خطأ في السيرفر أثناء حفظ البيانات" });
     }
 };
 
@@ -127,52 +111,30 @@ exports.registerCandidate = async (req, res) => {
 exports.loginCandidate = async (req, res) => {
     const { loginIdentifier, password } = req.body;
     try {
-        let candidate = await Candidate.findByEmail(loginIdentifier) || await Candidate.findByNationalId(loginIdentifier);
+        const result = await pool.query(
+            'SELECT * FROM candidates WHERE email = $1 OR national_id = $2',
+            [loginIdentifier, loginIdentifier]
+        );
+        const candidate = result.rows[0];
 
-        if (!candidate) {
-            return res.status(404).json({ success: false, message: "هذا الحساب غير موجود" });
-        }
+        if (!candidate) return res.status(404).json({ success: false, message: "الحساب غير موجود" });
 
         const isMatch = await bcrypt.compare(password, candidate.password);
-        if (!isMatch) {
-            return res.status(401).json({ success: false, message: "كلمة المرور غير صحيحة" });
-        }
+        if (!isMatch) return res.status(401).json({ success: false, message: "كلمة المرور خطأ" });
 
-        const token = jwt.sign(
-            { candidate_id: candidate.candidate_id, role: 'candidate' },
-            process.env.JWT_SECRET,
-            { expiresIn: '24h' }
-        );
-
-        res.status(200).json({
-            success: true,
-            token,
-            message: `أهلاً بك يا ${candidate.full_name ? candidate.full_name.split(' ')[0] : 'مرشحنا'}`,
-            data: {
-                id: candidate.candidate_id,
-                name: candidate.full_name,
-                symbol: candidate.election_symbol_url
-            }
-        });
+        const token = jwt.sign({ id: candidate.candidate_id }, process.env.JWT_SECRET, { expiresIn: '24h' });
+        res.json({ success: true, token, data: candidate });
     } catch (err) {
-        res.status(500).json({ success: false, message: "خطأ في السيرفر أثناء تسجيل الدخول" });
+        res.status(500).json({ success: false, message: "خطأ في تسجيل الدخول" });
     }
 };
 
-// 3. عرض قائمة المرشحين
+// 3. عرض القائمة
 exports.listCandidates = async (req, res) => {
-    const { governorate } = req.query;
-    if (!governorate) {
-        return res.status(400).json({ success: false, message: "يجب تحديد المحافظة" });
-    }
     try {
-        const candidates = await Candidate.getAllByGovernorate(governorate);
-        res.status(200).json({
-            success: true,
-            count: candidates.length,
-            data: candidates
-        });
+        const result = await pool.query('SELECT * FROM candidates');
+        res.json({ success: true, data: result.rows });
     } catch (err) {
-        res.status(500).json({ success: false, message: "خطأ في تحميل قائمة المرشحين" });
+        res.status(500).json({ success: false, message: "خطأ في تحميل القائمة" });
     }
 };
