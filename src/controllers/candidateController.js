@@ -108,44 +108,52 @@ exports.loginCandidate = async (req, res) => {
         const { national_id, email, password } = req.body;
         let candidate;
 
-        // 1. الدخول عبر التعرف على الوجه (يُرسل national_id فقط)
+        // 1. جلب بيانات المرشح (سواء بالوجه أو الإيميل)
         if (national_id && !password) {
             const result = await pool.query('SELECT * FROM candidates WHERE national_id = $1', [national_id]);
             candidate = result.rows[0];
-            
-            if (!candidate) {
-                return res.status(404).json({ success: false, message: "هذا الرقم القومي غير مسجل" });
-            }
+            if (!candidate) return res.status(404).json({ success: false, message: "الرقم القومي غير مسجل" });
         } 
-        
-        // 2. الدخول التقليدي (Email + Password)
         else if (email && password) {
             const result = await pool.query('SELECT * FROM candidates WHERE email = $1', [email]);
             candidate = result.rows[0];
-
             if (!candidate || !(await bcrypt.compare(password, candidate.password))) {
                 return res.status(401).json({ success: false, message: "بيانات الدخول غير صحيحة" });
             }
         } 
-        
         else {
-            return res.status(400).json({ success: false, message: "يرجى إرسال الرقم القومي للوجه أو الإيميل والباسورد" });
+            return res.status(400).json({ success: false, message: "يرجى تقديم بيانات الدخول" });
         }
 
-        // إنشاء التوكن
+        // 2. حساب العمر (Age) من تاريخ الميلاد
+        const birthDate = new Date(candidate.birth_date);
+        const today = new Date();
+        let age = today.getFullYear() - birthDate.getFullYear();
+        const m = today.getMonth() - birthDate.getMonth();
+        if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
+            age--;
+        }
+
+        // 3. إنشاء التوكن
         const token = jwt.sign(
             { id: candidate.candidate_id, role: 'candidate' }, 
             process.env.JWT_SECRET, 
             { expiresIn: '24h' }
         );
 
+        // 4. إرسال الاستجابة بالشكل المطلوب
         res.status(200).json({ 
             success: true, 
-            token, 
-            data: { 
-                id: candidate.candidate_id, 
+            token: token, 
+            user_data: { 
+                candidate_id: candidate.candidate_id, 
+                full_name: candidate.occupation, // أو الحقل الذي يخزن الاسم الكامل عندك
+                national_id: candidate.national_id,
                 email: candidate.email,
-                national_id: candidate.national_id 
+                age: age, // العمر المحسوب
+                election_symbol: candidate.election_symbol_url, // رابط الرمز الانتخابي
+                candidate_type: candidate.candidate_type,
+                short_bio: candidate.short_bio
             } 
         });
 
