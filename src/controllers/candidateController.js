@@ -102,46 +102,37 @@ exports.registerCandidate = async (req, res) => {
 };
 
 // --- 2. تسجيل دخول المرشح (دعم Face ID أو Email/Password) ---
+// --- تسجيل دخول المرشح (وجه أو إيميل وباسورد) ---
 exports.loginCandidate = async (req, res) => {
     try {
-        const { national_id, email, password, isFaceAuth } = req.body;
+        const { national_id, email, password } = req.body;
         let candidate;
 
-        // أ. الدخول عبر التعرف على الوجه
-        if (isFaceAuth && national_id) {
+        // 1. الدخول عبر التعرف على الوجه (يُرسل national_id فقط)
+        if (national_id && !password) {
             const result = await pool.query('SELECT * FROM candidates WHERE national_id = $1', [national_id]);
             candidate = result.rows[0];
             
             if (!candidate) {
-                return res.status(404).json({ success: false, message: "الرقم القومي غير مسجل كمرشح" });
+                return res.status(404).json({ success: false, message: "هذا الرقم القومي غير مسجل" });
             }
         } 
         
-        // ب. الدخول التقليدي بالبريد الإلكتروني
+        // 2. الدخول التقليدي (Email + Password)
         else if (email && password) {
             const result = await pool.query('SELECT * FROM candidates WHERE email = $1', [email]);
             candidate = result.rows[0];
 
             if (!candidate || !(await bcrypt.compare(password, candidate.password))) {
-                return res.status(401).json({ success: false, message: "البريد الإلكتروني أو كلمة المرور غير صحيحة" });
-            }
-        }
-
-        // ج. الدخول التقليدي بالرقم القومي وكلمة المرور
-        else if (national_id && password) {
-            const result = await pool.query('SELECT * FROM candidates WHERE national_id = $1', [national_id]);
-            candidate = result.rows[0];
-
-            if (!candidate || !(await bcrypt.compare(password, candidate.password))) {
-                return res.status(401).json({ success: false, message: "الرقم القومي أو كلمة المرور غير صحيحة" });
+                return res.status(401).json({ success: false, message: "بيانات الدخول غير صحيحة" });
             }
         } 
         
         else {
-            return res.status(400).json({ success: false, message: "يرجى تقديم بيانات تسجيل دخول كاملة" });
+            return res.status(400).json({ success: false, message: "يرجى إرسال الرقم القومي للوجه أو الإيميل والباسورد" });
         }
 
-        // إنشاء التوكن (JWT)
+        // إنشاء التوكن
         const token = jwt.sign(
             { id: candidate.candidate_id, role: 'candidate' }, 
             process.env.JWT_SECRET, 
@@ -154,17 +145,15 @@ exports.loginCandidate = async (req, res) => {
             data: { 
                 id: candidate.candidate_id, 
                 email: candidate.email,
-                national_id: candidate.national_id,
-                candidate_type: candidate.candidate_type
+                national_id: candidate.national_id 
             } 
         });
 
     } catch (err) {
         console.error("Login Error:", err);
-        res.status(500).json({ success: false, message: "خطأ في السيرفر أثناء تسجيل الدخول" });
+        res.status(500).json({ success: false, message: "خطأ في السيرفر" });
     }
 };
-
 // --- 3. عرض قائمة المرشحين ---
 exports.listCandidates = async (req, res) => {
     try {
