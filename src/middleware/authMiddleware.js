@@ -1,34 +1,52 @@
-const express = require('express');
-const router = express.Router();
-const candidateController = require('../controllers/candidateController');
-const auth = require('../middleware/authMiddleware'); // تم تصحيح المسار هنا (شيلنا الـ s)
+const jwt = require('jsonwebtoken');
 
-// إعداد multer
-const multer = require('multer');
-const storage = multer.memoryStorage();
-const upload = multer({ 
-    storage: storage,
-    limits: { fileSize: 5 * 1024 * 1024 } // 5 ميجا
-});
+/**
+ * ميدل وير للتحقق من التوكن (JWT)
+ * يضمن أن المستخدم (ناخب أو مرشح) مسجل دخول ومعاد توحيد بياناته في req.user
+ */
+const authMiddleware = (req, res, next) => {
+    // 1. الحصول على الـ Token من الهيدر (Authorization: Bearer <TOKEN>)
+    const authHeader = req.headers['authorization'];
+    const token = authHeader && authHeader.split(' ')[1];
 
-// تعريف الحقول
-const candidateUploadFields = upload.fields([
-    { name: 'party_card_url', maxCount: 1 },
-    { name: 'personal_photos_url', maxCount: 5 },
-    { name: 'national_id_card_url', maxCount: 1 },
-    { name: 'education_url', maxCount: 1 },
-    { name: 'military_service_url', maxCount: 1 },
-    { name: 'financial_disclosure_url', maxCount: 1 },
-    { name: 'birth_certificate_url', maxCount: 1 },
-    { name: 'fitness_health_url', maxCount: 1 },
-    { name: 'criminal_record_url', maxCount: 1 },
-    { name: 'deposit_receipt_url', maxCount: 1 },
-    { name: 'election_symbol_url', maxCount: 1 }
-]);
+    // 2. التحقق من وجود التوكن
+    if (!token) {
+        return res.status(401).json({ 
+            success: false, 
+            message: "دخول غير مصرح به، يرجى تسجيل الدخول أولاً" 
+        });
+    }
 
-// الروابط
-router.post('/register', candidateUploadFields, candidateController.registerCandidate);
-router.post('/loginCandidate', candidateController.loginCandidate);
-router.get('/list', candidateController.listCandidates);
+    try {
+        // 3. فك التوكن والتحقق من صلاحيته
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-module.exports = router;
+        /**
+         * 4. توحيد بيانات المستخدم (Normalization)
+         * بنجمع الـ ID سواء كان اسمه (voter_id) أو (candidate_id) ونخليه (id) بس
+         * وبنحفظ الـ role (voter/candidate) عشان نحدد الجدول لاحقاً في الـ Controllers
+         */
+        req.user = {
+            id: decoded.id || decoded.voter_id || decoded.candidate_id, 
+            role: decoded.role,
+            national_id: decoded.national_id
+        };
+
+        // التأكد من أن البيانات الأساسية موجودة في التوكن
+        if (!req.user.id || !req.user.role) {
+            throw new Error("التوكن لا يحتوي على بيانات الهوية المطلوبة");
+        }
+
+        // 5. الانتقال للخطوة التالية
+        next();
+    } catch (err) {
+        // 6. التعامل مع التوكن المنتهي أو غير الصالح
+        console.error("Auth Middleware Error:", err.message);
+        return res.status(403).json({ 
+            success: false, 
+            message: "جلسة الدخول منتهية أو غير صالحة، يرجى إعادة تسجيل الدخول" 
+        });
+    }
+};
+
+module.exports = authMiddleware;

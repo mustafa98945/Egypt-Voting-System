@@ -108,11 +108,12 @@ exports.loginCandidate = async (req, res) => {
         const { national_id, email, password } = req.body;
         let candidate;
 
-        // 1. جلب بيانات المرشح (سواء بالوجه أو الإيميل)
+        // 1. جلب بيانات المرشح (دعم الدخول بالوجه أو الإيميل والباسورد)
+        // ملاحظة: تأكد من تنفيذ ALTER TABLE candidates ADD COLUMN has_voted BOOLEAN DEFAULT FALSE;
         if (national_id && !password) {
             const result = await pool.query('SELECT * FROM candidates WHERE national_id = $1', [national_id]);
             candidate = result.rows[0];
-            if (!candidate) return res.status(404).json({ success: false, message: "الرقم القومي غير مسجل" });
+            if (!candidate) return res.status(404).json({ success: false, message: "الرقم القومي غير مسجل كمرشح" });
         } 
         else if (email && password) {
             const result = await pool.query('SELECT * FROM candidates WHERE email = $1', [email]);
@@ -122,10 +123,10 @@ exports.loginCandidate = async (req, res) => {
             }
         } 
         else {
-            return res.status(400).json({ success: false, message: "يرجى تقديم بيانات الدخول" });
+            return res.status(400).json({ success: false, message: "يرجى تقديم بيانات الدخول (الرقم القومي أو البريد الإلكتروني)" });
         }
 
-        // 2. حساب العمر (Age) من تاريخ الميلاد
+        // 2. حساب العمر (Age) بدقة من تاريخ الميلاد
         const birthDate = new Date(candidate.birth_date);
         const today = new Date();
         let age = today.getFullYear() - birthDate.getFullYear();
@@ -134,36 +135,42 @@ exports.loginCandidate = async (req, res) => {
             age--;
         }
 
-        // 3. إنشاء التوكن
+        // 3. إنشاء التوكن (JWT) - البيانات دي هي اللي بيقرأها الـ authMiddleware
         const token = jwt.sign(
-            { id: candidate.candidate_id, role: 'candidate' }, 
+            { 
+                id: candidate.candidate_id, 
+                role: 'candidate', 
+                national_id: candidate.national_id 
+            }, 
             process.env.JWT_SECRET, 
             { expiresIn: '24h' }
         );
 
-        // 4. إرسال الاستجابة بالشكل المطلوب
+        // 4. إرسال الاستجابة بالهيكل المطلوب للـ UI
         res.status(200).json({ 
             success: true, 
             token: token, 
             user_data: { 
-                candidate_id: candidate.candidate_id, 
-                full_name: candidate.occupation, // أو الحقل الذي يخزن الاسم الكامل عندك
+                id: candidate.candidate_id, 
+                full_name: candidate.occupation, // تأكد لو الاسم متخزن في حقل تاني غير occupation
                 national_id: candidate.national_id,
                 email: candidate.email,
-                age: age, // العمر المحسوب
-                election_symbol: candidate.election_symbol_url, // رابط الرمز الانتخابي
+                age: age, 
+                symbol: candidate.election_symbol_url, // الرمز الانتخابي
+                has_voted: candidate.has_voted || false, // الحالة من جدول المرشحين
                 candidate_type: candidate.candidate_type,
+                governorate: "القاهرة", // قيمة افتراضية حالياً
+                unit: "قسم قصر النيل", // قيمة افتراضية حالياً
                 short_bio: candidate.short_bio
             } 
         });
 
     } catch (err) {
-        console.error("Login Error:", err);
-        res.status(500).json({ success: false, message: "خطأ في السيرفر" });
+        console.error("Candidate Login Error:", err);
+        res.status(500).json({ success: false, message: "حدث خطأ في السيرفر أثناء تسجيل الدخول" });
     }
 };
-// --- 3. عرض قائمة المرشحين ---
-exports.listCandidates = async (req, res) => {
+;exports.listCandidates = async (req, res) => {
     try {
         const result = await pool.query('SELECT candidate_id, national_id, email, occupation, candidate_type FROM candidates ORDER BY created_at DESC');
         res.json({ success: true, data: result.rows });

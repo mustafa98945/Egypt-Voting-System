@@ -95,10 +95,10 @@ exports.login = async (req, res) => {
         let user;
 
         if (national_id_from_face) {
-            // الدخول ببصمة الوجه
+            // 1. الدخول ببصمة الوجه
             user = await Voter.findByIdentifier(national_id_from_face, true);
         } else {
-            // الدخول التقليدي بالبريد
+            // 2. الدخول التقليدي بالبريد
             user = await Voter.findByIdentifier(email, false);
             if (user) {
                 const isMatch = await bcrypt.compare(password, user.password);
@@ -108,26 +108,32 @@ exports.login = async (req, res) => {
 
         if (!user) return res.status(401).json({ success: false, message: "بيانات الدخول غير صحيحة" });
 
-        // توليد التوكن
+        // 3. توليد التوكن (JWT) - المسميات هنا اتوحدت مع الـ Candidate والـ Middleware
         const token = jwt.sign(
-            { voter_id: user.voter_id, national_id: user.national_id },
+            { 
+                id: user.voter_id,          // استخدمنا id بدل voter_id للتوحيد
+                role: 'voter',              // ضفنا الـ role ضروري جداً لعملية التصويت
+                national_id: user.national_id 
+            },
             process.env.JWT_SECRET,
             { expiresIn: '24h' }
         );
 
+        // 4. إرسال الاستجابة (user_data متوافقة مع الـ UI Card)
         res.json({ 
             success: true, 
             token, 
             user_data: { 
-                voter_id: user.voter_id, 
+                id: user.voter_id,          // توحيد اسم الحقل لـ id
                 full_name: user.full_name, 
+                national_id: user.national_id, // ضفناه عشان يظهر في الـ Voter Card
                 governorate: user.governorate_name, 
                 unit: user.unit_name, 
-                has_voted: user.has_voted 
+                has_voted: user.has_voted || false // الحالة من جدول الـ voters
             } 
         });
     } catch (err) {
-        console.error("Login Error:", err);
+        console.error("Voter Login Error:", err);
         res.status(500).json({ success: false, message: "حدث خطأ في السيرفر أثناء تسجيل الدخول" });
     }
 };
