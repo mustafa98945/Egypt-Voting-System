@@ -1,4 +1,4 @@
-const bcrypt = require('bcryptjs'); // تم توحيد المكتبة لـ bcryptjs
+const bcrypt = require('bcryptjs'); 
 const sharp = require('sharp');
 const jwt = require('jsonwebtoken');
 const Voter = require('../models/voterModel');
@@ -25,7 +25,7 @@ const processBase64AndUpload = async (base64String, fileName, folder = 'voters')
     }
 };
 
-// 1. التحقق المبدئي
+// 1. التحقق المبدئي (قبل التسجيل)
 exports.verifyBeforeRegister = async (req, res) => {
     const { national_id, birth_date, expiry_date } = req.body;
     try {
@@ -36,7 +36,8 @@ exports.verifyBeforeRegister = async (req, res) => {
         }
         res.json({ success: true, data: citizen });
     } catch (err) {
-        res.status(500).json({ success: false, message: "حدث خطأ في السيرفر" });
+        console.error("Verification Error:", err.message);
+        res.status(500).json({ success: false, message: "حدث خطأ في السيرفر أثناء التحقق" });
     }
 };
 
@@ -45,7 +46,7 @@ exports.registerVoter = async (req, res) => {
     try {
         const { 
             national_id, birth_date, expiry_date, email, 
-            password, confirm_password,
+            password, 
             party_card_url // استلامه كـ Base64 String
         } = req.body;
         
@@ -55,7 +56,7 @@ exports.registerVoter = async (req, res) => {
             return res.status(401).json({ success: false, message: "بيانات الهوية غير مطابقة للسجل المدني" });
         }
 
-        // --- معالجة الكارنيه الحزبي لو موجود (Base64 to Supabase) ---
+        // معالجة الكارنيه الحزبي لو موجود
         let finalPartyCardUrl = null;
         if (party_card_url) {
             finalPartyCardUrl = await processBase64AndUpload(
@@ -75,7 +76,7 @@ exports.registerVoter = async (req, res) => {
         
         res.status(201).json({ 
             success: true, 
-            message: "تم إنشاء حسابك بنجاح باستخدام المعالجة السريعة" 
+            message: "تم إنشاء حسابك بنجاح" 
         });
 
     } catch (err) {
@@ -94,7 +95,7 @@ exports.login = async (req, res) => {
     try {
         let user;
 
-        // 1. تحديد طريقة الدخول (وجه أو إيميل)
+        // تحديد طريقة الدخول (بصمة وجه أو إيميل)
         if (national_id_from_face) {
             user = await Voter.findByIdentifier(national_id_from_face, true);
         } else if (email && password) {
@@ -102,19 +103,18 @@ exports.login = async (req, res) => {
             if (user) {
                 const isMatch = await bcrypt.compare(password, user.password);
                 if (!isMatch) {
-                    return res.status(401).json({ success: false, message: "كلمة المرور غير صحيحة" });
+                    return res.status(401).json({ success: false, message: "بيانات الدخول غير صحيحة" });
                 }
             }
         } else {
             return res.status(400).json({ success: false, message: "يرجى تقديم بيانات الدخول المطلوبة" });
         }
 
-        // 2. التحقق من وجود المستخدم
         if (!user) {
-            return res.status(404).json({ success: false, message: "بيانات الدخول غير صحيحة أو المستخدم غير مسجل" });
+            return res.status(404).json({ success: false, message: "المستخدم غير موجود أو البيانات خاطئة" });
         }
 
-        // 3. توليد التوكن (JWT) بالبيانات الموحدة
+        // توليد التوكن بالبيانات الموحدة للميدل وير
         const token = jwt.sign(
             { 
                 id: user.voter_id, 
@@ -125,7 +125,7 @@ exports.login = async (req, res) => {
             { expiresIn: '24h' }
         );
 
-        // 4. إرسال الاستجابة متوافقة مع الـ Flutter App
+        // إرسال الاستجابة
         res.status(200).json({ 
             success: true, 
             token: token, 
@@ -143,7 +143,7 @@ exports.login = async (req, res) => {
         console.error("Voter Login Error Details:", err.message);
         res.status(500).json({ 
             success: false, 
-            message: "حدث خطأ فني في السيرفر أثناء تسجيل الدخول" 
+            message: "حدث خطأ في السيرفر أثناء تسجيل الدخول" 
         });
     }
 };
