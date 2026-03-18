@@ -18,33 +18,42 @@ const authMiddleware = (req, res, next) => {
     }
 
     try {
-        // 3. فك التوكن والتحقق من صلاحيته
+        // 3. فك التوكن والتحقق من صلاحيته باستخدام المفتاح السري
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
         /**
          * 4. توحيد بيانات المستخدم (Normalization)
-         * بنجمع الـ ID سواء كان اسمه (voter_id) أو (candidate_id) ونخليه (id) بس
-         * وبنحفظ الـ role (voter/candidate) عشان نحدد الجدول لاحقاً في الـ Controllers
+         * بنحاول نقرأ الـ ID بأي مسمى محتمل (id, voter_id, candidate_id) ونوحده في req.user.id
          */
         req.user = {
             id: decoded.id || decoded.voter_id || decoded.candidate_id, 
-            role: decoded.role,
+            role: decoded.role, // سواء كان 'voter' أو 'candidate'
             national_id: decoded.national_id
         };
 
-        // التأكد من أن البيانات الأساسية موجودة في التوكن
+        // التأكد من أن البيانات الأساسية (ID والـ Role) موجودة فعلياً داخل التوكن
         if (!req.user.id || !req.user.role) {
+            console.error("Auth Error: Missing fields in token payload", decoded);
             throw new Error("التوكن لا يحتوي على بيانات الهوية المطلوبة");
         }
 
-        // 5. الانتقال للخطوة التالية
+        // 5. الانتقال للخطوة التالية (الـ Controller)
         next();
     } catch (err) {
         // 6. التعامل مع التوكن المنتهي أو غير الصالح
         console.error("Auth Middleware Error:", err.message);
+        
+        // لو الخطأ إن التوكن منتهي (Expired)
+        if (err.name === 'TokenExpiredError') {
+            return res.status(401).json({ 
+                success: false, 
+                message: "انتهت صلاحية الجلسة، يرجى تسجيل الدخول مرة أخرى" 
+            });
+        }
+
         return res.status(403).json({ 
             success: false, 
-            message: "جلسة الدخول منتهية أو غير صالحة، يرجى إعادة تسجيل الدخول" 
+            message: "جلسة الدخول غير صالحة" 
         });
     }
 };
