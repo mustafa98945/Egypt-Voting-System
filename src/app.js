@@ -6,15 +6,16 @@ const cors = require('cors');
 const voterRoutes = require('./routes/voterRoutes');
 const candidateRoutes = require('./routes/candidateRoutes');
 const voteRoutes = require('./routes/voteRoutes'); 
+const statsRoutes = require('./routes/statsRoutes'); // المسار الجديد للإحصائيات
 
 const app = express();
 
-// 2. إعدادات الـ CORS والسماح بالبيانات الكبيرة (مهم للصور الـ Base64)
+// 2. إعدادات الـ CORS والسماح بالبيانات الكبيرة
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
-// الصفحة الرئيسية للتأكد أن السيرفر يعمل
+// الصفحة الرئيسية
 app.get('/', (req, res) => {
     res.send(`
         <div style="text-align: center; margin-top: 50px; font-family: Arial, sans-serif;">
@@ -25,32 +26,22 @@ app.get('/', (req, res) => {
 });
 
 // 3. تعريف الروابط الأساسية (Endpoints)
-// مسارات الناخبين (تسجيل، دخول، تحقق)
 app.use('/api/voters', voterRoutes);         
-
-// مسارات المرشحين (عرض القوائم، بيانات المرشح)
 app.use('/api/candidates', candidateRoutes); 
-
-// مسارات التصويت (عملية تسجيل الصوت المحمية)
 app.use('/api/vote', voteRoutes); 
+app.use('/api/stats', statsRoutes); // تفعيل رابط الإحصائيات
 
 
-// 4. معالجة الأخطاء العامة (Global Error Handler)
+// 4. معالجة الأخطاء العامة
 app.use((err, req, res, next) => {
-    // خطأ حجم البيانات (لو الصورة أكبر من 50 ميجا)
     if (err.type === 'entity.too.large') {
         return res.status(413).json({ 
             success: false, 
-            message: "حجم البيانات كبير جداً، يرجى محاولة رفع صور أصغر أو ضغطها" 
+            message: "حجم البيانات كبير جداً" 
         });
     }
-    
-    // أي خطأ غير متوقع آخر
     console.error("Internal Server Error:", err.stack);
-    res.status(500).json({ 
-        success: false, 
-        message: "حدث خطأ داخلي في السيرفر، يرجى المحاولة لاحقاً" 
-    });
+    res.status(500).json({ success: false, message: "حدث خطأ داخلي" });
 });
 
 // 5. تشغيل السيرفر
@@ -62,5 +53,6 @@ app.listen(PORT, () => {
     console.log(`   ✅ Voters:     /api/voters`);
     console.log(`   ✅ Candidates: /api/candidates`);
     console.log(`   ✅ Voting:     /api/vote/cast`);
+    console.log(`   ✅ Stats:      /api/stats/top-candidates`); // المسار الجديد ظهر هنا
     console.log(`-----------------------------------------`);
 });
