@@ -5,13 +5,15 @@ exports.getTopCandidates = async (req, res) => {
         const query = `
             SELECT 
                 c.candidate_id, 
-                c.full_name, 
-                c.party_name, 
-                c.image_url,
+                cr.full_name, 
+                c.candidate_type,
                 COUNT(v.id) AS total_votes
             FROM candidates c
+            -- ربط مع السجل المدني لجلب الاسم الحقيقي --
+            JOIN civil_registry cr ON c.national_id = cr.national_id
+            -- ربط مع الأصوات --
             LEFT JOIN votes v ON c.candidate_id = v.candidate_id
-            GROUP BY c.candidate_id
+            GROUP BY c.candidate_id, cr.full_name, c.candidate_type
             ORDER BY total_votes DESC
             LIMIT 5;
         `;
@@ -23,14 +25,16 @@ exports.getTopCandidates = async (req, res) => {
             data: result.rows
         });
     } catch (err) {
-        console.error("Stats Error:", err.message);
-        res.status(500).json({ success: false, message: "خطأ في جلب الإحصائيات" });
+        console.error("Stats Error Details:", err.message);
+        res.status(500).json({ 
+            success: false, 
+            message: "حدث خطأ أثناء جلب إحصائيات المرشحين" 
+        });
     }
 };
 
 exports.getElectionSummary = async (req, res) => {
     try {
-        // إحصائيات سريعة: إجمالي الأصوات، إجمالي الناخبين، ونسبة المشاركة
         const summaryQuery = `
             SELECT 
                 (SELECT COUNT(*) FROM votes) as total_votes_cast,
