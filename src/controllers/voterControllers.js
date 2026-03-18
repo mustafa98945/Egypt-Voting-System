@@ -1,7 +1,7 @@
-const Voter = require('../models/voterModel');
-const bcrypt = require('bcrypt');
+const bcrypt = require('bcryptjs'); // تم توحيد المكتبة لـ bcryptjs
 const sharp = require('sharp');
 const jwt = require('jsonwebtoken');
+const Voter = require('../models/voterModel');
 const { uploadToSupabase } = require('../utils/supabaseHelper');
 
 // --- دالة مساعدة لتحويل Base64 إلى Buffer ورفعه (Fast Processing) ---
@@ -25,7 +25,7 @@ const processBase64AndUpload = async (base64String, fileName, folder = 'voters')
     }
 };
 
-// 1. التحقق المبدئي (يبقى كما هو لأنه يعتمد على نصوص فقط)
+// 1. التحقق المبدئي
 exports.verifyBeforeRegister = async (req, res) => {
     const { national_id, birth_date, expiry_date } = req.body;
     try {
@@ -49,7 +49,6 @@ exports.registerVoter = async (req, res) => {
             party_card_url // استلامه كـ Base64 String
         } = req.body;
         
-
         // التحقق من الهوية في السجل المدني
         const citizen = await Voter.verifyInRegistry(national_id, birth_date, expiry_date);
         if (!citizen) {
@@ -89,10 +88,6 @@ exports.registerVoter = async (req, res) => {
 };
 
 // 3. تسجيل الدخول (JWT)
-const jwt = require('jsonwebtoken');
-const bcrypt = require('bcryptjs');
-const Voter = require('../models/voterModel'); // تأكد من المسار الصحيح للموديل
-
 exports.login = async (req, res) => {
     const { email, password, national_id_from_face } = req.body;
     
@@ -101,10 +96,8 @@ exports.login = async (req, res) => {
 
         // 1. تحديد طريقة الدخول (وجه أو إيميل)
         if (national_id_from_face) {
-            // الدخول ببصمة الوجه باستخدام الرقم القومي
             user = await Voter.findByIdentifier(national_id_from_face, true);
         } else if (email && password) {
-            // الدخول التقليدي بالبريد الإلكتروني والباسورد
             user = await Voter.findByIdentifier(email, false);
             if (user) {
                 const isMatch = await bcrypt.compare(password, user.password);
@@ -121,18 +114,18 @@ exports.login = async (req, res) => {
             return res.status(404).json({ success: false, message: "بيانات الدخول غير صحيحة أو المستخدم غير مسجل" });
         }
 
-        // 3. توليد التوكن (JWT) - السطرين (id و role) هما حل مشكلة الـ Error اللي كانت بتظهرلك
+        // 3. توليد التوكن (JWT) بالبيانات الموحدة
         const token = jwt.sign(
             { 
-                id: user.voter_id,          // توحيد المسمى لـ id عشان الـ Middleware يقرأه
-                role: 'voter',              // إضافة الـ role عشان الـ Cast Vote يشتغل
+                id: user.voter_id, 
+                role: 'voter', 
                 national_id: user.national_id 
             },
             process.env.JWT_SECRET,
             { expiresIn: '24h' }
         );
 
-        // 4. إرسال الاستجابة (user_data) متوافقة مع الـ UI Card في Flutter
+        // 4. إرسال الاستجابة متوافقة مع الـ Flutter App
         res.status(200).json({ 
             success: true, 
             token: token, 
