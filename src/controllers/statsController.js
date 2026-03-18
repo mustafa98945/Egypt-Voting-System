@@ -7,11 +7,9 @@ exports.getTopCandidates = async (req, res) => {
                 c.candidate_id, 
                 cr.full_name, 
                 c.candidate_type,
-                COUNT(v.id) AS total_votes
+                COUNT(v.voter_id) AS total_votes
             FROM candidates c
-            -- ربط مع السجل المدني لجلب الاسم الحقيقي --
             JOIN civil_registry cr ON c.national_id = cr.national_id
-            -- ربط مع الأصوات --
             LEFT JOIN votes v ON c.candidate_id = v.candidate_id
             GROUP BY c.candidate_id, cr.full_name, c.candidate_type
             ORDER BY total_votes DESC
