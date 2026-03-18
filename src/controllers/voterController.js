@@ -4,146 +4,64 @@ const jwt = require('jsonwebtoken');
 const Voter = require('../models/voterModel');
 const { uploadToSupabase } = require('../utils/supabaseHelper');
 
-// --- دالة مساعدة لتحويل Base64 إلى Buffer ورفعه (Fast Processing) ---
 const processBase64AndUpload = async (base64String, fileName, folder = 'voters') => {
     try {
         if (!base64String) return null;
-
-        // إزالة الجزء التعريفي من الـ Base64 لو وجد
         const base64Data = base64String.replace(/^data:image\/\w+;base64,/, "");
         const buffer = Buffer.from(base64Data, 'base64');
-
-        // معالجة الصورة باستخدام Sharp لضمان الجودة والحجم
-        const optimized = await sharp(buffer)
-            .jpeg({ quality: 75 })
-            .toBuffer();
-            
+        const optimized = await sharp(buffer).jpeg({ quality: 75 }).toBuffer();
         return await uploadToSupabase(optimized, fileName, folder);
     } catch (error) {
-        console.error(`خطأ في معالجة Base64 للملف ${fileName}:`, error);
-        throw new Error("فشل في معالجة ورفع الصورة");
+        console.error(`خطأ في معالجة الصورة:`, error);
+        throw new Error("فشل رفع الصورة");
     }
 };
 
-// 1. التحقق المبدئي (قبل التسجيل)
 exports.verifyBeforeRegister = async (req, res) => {
-    const { national_id, birth_date, expiry_date } = req.body;
     try {
+        const { national_id, birth_date, expiry_date } = req.body;
         const citizen = await Voter.verifyInRegistry(national_id, birth_date, expiry_date);
-        
-        if (!citizen) {
-            return res.status(401).json({ success: false, message: "حدث خطأ في البيانات المدخلة، يرجى المراجعة" });
-        }
+        if (!citizen) return res.status(401).json({ success: false, message: "بيانات غير صحيحة" });
         res.json({ success: true, data: citizen });
-    } catch (err) {
-        console.error("Verification Error:", err.message);
-        res.status(500).json({ success: false, message: "حدث خطأ في السيرفر أثناء التحقق" });
-    }
+    } catch (err) { res.status(500).json({ success: false, message: "خطأ في السيرفر" }); }
 };
 
-// 2. تسجيل حساب الناخب (JSON Mode)
 exports.registerVoter = async (req, res) => {
     try {
-        const { 
-            national_id, birth_date, expiry_date, email, 
-            password, 
-            party_card_url // استلامه كـ Base64 String
-        } = req.body;
-        
-        // التحقق من الهوية في السجل المدني
+        const { national_id, birth_date, expiry_date, email, password, party_card_url } = req.body;
         const citizen = await Voter.verifyInRegistry(national_id, birth_date, expiry_date);
-        if (!citizen) {
-            return res.status(401).json({ success: false, message: "بيانات الهوية غير مطابقة للسجل المدني" });
-        }
+        if (!citizen) return res.status(401).json({ success: false, message: "الهوية غير مطابقة" });
 
-        // معالجة الكارنيه الحزبي لو موجود
-        let finalPartyCardUrl = null;
-        if (party_card_url) {
-            finalPartyCardUrl = await processBase64AndUpload(
-                party_card_url, 
-                `voter_card_${national_id}_${Date.now()}.jpg`
-            );
-        }
-
+        let finalPartyCardUrl = party_card_url ? await processBase64AndUpload(party_card_url, `card_${national_id}_${Date.now()}.jpg`) : null;
         const hashedPassword = await bcrypt.hash(password, 10);
         
-        await Voter.create({ 
-            national_id, 
-            email, 
-            password: hashedPassword, 
-            party_card_url: finalPartyCardUrl 
-        });
-        
-        res.status(201).json({ 
-            success: true, 
-            message: "تم إنشاء حسابك بنجاح" 
-        });
-
+        await Voter.create({ national_id, email, password: hashedPassword, party_card_url: finalPartyCardUrl });
+        res.status(201).json({ success: true, message: "تم التسجيل بنجاح" });
     } catch (err) {
-        if (err.code === '23505') {
-            return res.status(400).json({ success: false, message: "هذا الحساب مسجل بالفعل" });
-        }
-        console.error("Voter Registration Error:", err.message);
-        res.status(500).json({ success: false, message: "حدث خطأ في السيرفر أثناء التسجيل" });
+        if (err.code === '23505') return res.status(400).json({ success: false, message: "مسجل بالفعل" });
+        res.status(500).json({ success: false, message: "خطأ في التسجيل" });
     }
 };
 
-// 3. تسجيل الدخول (JWT)
 exports.login = async (req, res) => {
     const { email, password, national_id_from_face } = req.body;
-    
     try {
         let user;
-
-        // تحديد طريقة الدخول (بصمة وجه أو إيميل)
         if (national_id_from_face) {
             user = await Voter.findByIdentifier(national_id_from_face, true);
-        } else if (email && password) {
-            user = await Voter.findByIdentifier(email, false);
-            if (user) {
-                const isMatch = await bcrypt.compare(password, user.password);
-                if (!isMatch) {
-                    return res.status(401).json({ success: false, message: "بيانات الدخول غير صحيحة" });
-                }
-            }
         } else {
-            return res.status(400).json({ success: false, message: "يرجى تقديم بيانات الدخول المطلوبة" });
+            user = await Voter.findByIdentifier(email, false);
+            if (user && !(await bcrypt.compare(password, user.password))) user = null;
         }
 
-        if (!user) {
-            return res.status(404).json({ success: false, message: "المستخدم غير موجود أو البيانات خاطئة" });
-        }
+        if (!user) return res.status(401).json({ success: false, message: "بيانات خاطئة" });
 
-        // توليد التوكن بالبيانات الموحدة للميدل وير
         const token = jwt.sign(
-            { 
-                id: user.voter_id, 
-                role: 'voter', 
-                national_id: user.national_id 
-            },
+            { id: user.voter_id, role: 'voter', national_id: user.national_id },
             process.env.JWT_SECRET,
             { expiresIn: '24h' }
         );
 
-        // إرسال الاستجابة
-        res.status(200).json({ 
-            success: true, 
-            token: token, 
-            user_data: { 
-                id: user.voter_id, 
-                full_name: user.full_name, 
-                national_id: user.national_id, 
-                governorate: user.governorate_name || "غير محدد", 
-                unit: user.unit_name || "غير محدد", 
-                has_voted: user.has_voted || false 
-            } 
-        });
-
-    } catch (err) {
-        console.error("Voter Login Error Details:", err.message);
-        res.status(500).json({ 
-            success: false, 
-            message: "حدث خطأ في السيرفر أثناء تسجيل الدخول" 
-        });
-    }
+        res.status(200).json({ success: true, token, user_data: { id: user.voter_id, full_name: user.full_name, national_id: user.national_id, governorate: user.governorate_name, unit: user.unit_name, has_voted: user.has_voted } });
+    } catch (err) { res.status(500).json({ success: false, message: "خطأ في الدخول" }); }
 };
