@@ -89,51 +89,68 @@ exports.registerVoter = async (req, res) => {
 };
 
 // 3. تسجيل الدخول (JWT)
+const jwt = require('jsonwebtoken');
+const bcrypt = require('bcryptjs');
+const Voter = require('../models/voterModel'); // تأكد من المسار الصحيح للموديل
+
 exports.login = async (req, res) => {
     const { email, password, national_id_from_face } = req.body;
+    
     try {
         let user;
 
+        // 1. تحديد طريقة الدخول (وجه أو إيميل)
         if (national_id_from_face) {
-            // 1. الدخول ببصمة الوجه
+            // الدخول ببصمة الوجه باستخدام الرقم القومي
             user = await Voter.findByIdentifier(national_id_from_face, true);
-        } else {
-            // 2. الدخول التقليدي بالبريد
+        } else if (email && password) {
+            // الدخول التقليدي بالبريد الإلكتروني والباسورد
             user = await Voter.findByIdentifier(email, false);
             if (user) {
                 const isMatch = await bcrypt.compare(password, user.password);
-                if (!isMatch) user = null;
+                if (!isMatch) {
+                    return res.status(401).json({ success: false, message: "كلمة المرور غير صحيحة" });
+                }
             }
+        } else {
+            return res.status(400).json({ success: false, message: "يرجى تقديم بيانات الدخول المطلوبة" });
         }
 
-        if (!user) return res.status(401).json({ success: false, message: "بيانات الدخول غير صحيحة" });
+        // 2. التحقق من وجود المستخدم
+        if (!user) {
+            return res.status(404).json({ success: false, message: "بيانات الدخول غير صحيحة أو المستخدم غير مسجل" });
+        }
 
-        // 3. توليد التوكن (JWT) - المسميات هنا اتوحدت مع الـ Candidate والـ Middleware
+        // 3. توليد التوكن (JWT) - السطرين (id و role) هما حل مشكلة الـ Error اللي كانت بتظهرلك
         const token = jwt.sign(
             { 
-                id: user.voter_id,          // استخدمنا id بدل voter_id للتوحيد
-                role: 'voter',              // ضفنا الـ role ضروري جداً لعملية التصويت
+                id: user.voter_id,          // توحيد المسمى لـ id عشان الـ Middleware يقرأه
+                role: 'voter',              // إضافة الـ role عشان الـ Cast Vote يشتغل
                 national_id: user.national_id 
             },
             process.env.JWT_SECRET,
             { expiresIn: '24h' }
         );
 
-        // 4. إرسال الاستجابة (user_data متوافقة مع الـ UI Card)
-        res.json({ 
+        // 4. إرسال الاستجابة (user_data) متوافقة مع الـ UI Card في Flutter
+        res.status(200).json({ 
             success: true, 
-            token, 
+            token: token, 
             user_data: { 
-                id: user.voter_id,          // توحيد اسم الحقل لـ id
+                id: user.voter_id, 
                 full_name: user.full_name, 
-                national_id: user.national_id, // ضفناه عشان يظهر في الـ Voter Card
-                governorate: user.governorate_name, 
-                unit: user.unit_name, 
-                has_voted: user.has_voted || false // الحالة من جدول الـ voters
+                national_id: user.national_id, 
+                governorate: user.governorate_name || "غير محدد", 
+                unit: user.unit_name || "غير محدد", 
+                has_voted: user.has_voted || false 
             } 
         });
+
     } catch (err) {
-        console.error("Voter Login Error:", err);
-        res.status(500).json({ success: false, message: "حدث خطأ في السيرفر أثناء تسجيل الدخول" });
+        console.error("Voter Login Error Details:", err.message);
+        res.status(500).json({ 
+            success: false, 
+            message: "حدث خطأ فني في السيرفر أثناء تسجيل الدخول" 
+        });
     }
 };
