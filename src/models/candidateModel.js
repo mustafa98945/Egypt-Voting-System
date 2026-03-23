@@ -56,10 +56,11 @@ class Candidate {
 
     // 4. جلب البروفايل الكامل (مع معالجة احتمال الـ ID غير الرقمي)
     static async getFullProfile(candidateId) {
-        // تأكد أن candidateId رقم صحيح لتجنب خطأ الـ SQL
+    try {
         const cleanId = parseInt(candidateId);
         if (isNaN(cleanId)) return null;
 
+        // استخدمنا الـ Alias (c و cr) للتأكد من عدم تضارب الأسماء
         const query = `
             SELECT 
                 c.candidate_id, 
@@ -71,14 +72,21 @@ class Candidate {
                 c.candidate_type,
                 c.election_symbol_url,
                 c.personal_photos_url,
-                EXTRACT(YEAR FROM AGE(cr.birth_date))::INT as age
+                -- قمنا بإضافة COALESCE للتأكد إنه لو مفيش تاريخ ميلاد السيرفر ميعملش Crash
+                COALESCE(EXTRACT(YEAR FROM AGE(cr.birth_date))::INT, 0) as age
             FROM candidates c
-            JOIN civil_registry cr ON c.national_id = cr.national_id
+            INNER JOIN civil_registry cr ON c.national_id = cr.national_id
             WHERE c.candidate_id = $1
         `;
+        
         const { rows } = await pool.query(query, [cleanId]);
         return rows[0];
+    } catch (err) {
+        // ده هيخلي الخطأ يظهر لك في الـ Logs بتاعة Render بالظبط
+        console.error("Database Query Error:", err.message);
+        throw err; 
     }
+}
 }
 
 module.exports = Candidate;
