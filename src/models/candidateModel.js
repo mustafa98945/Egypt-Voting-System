@@ -1,7 +1,7 @@
 const pool = require('../config/db');
 
 class Candidate {
-    // 1. إنشاء مرشح جديد مع إرجاع كافة البيانات بعد الإدخال
+    // 1. إنشاء مرشح جديد
     static async create(data) {
         const query = `
             INSERT INTO candidates (
@@ -30,7 +30,7 @@ class Candidate {
         return rows[0];
     }
 
-    // 2. البحث بالرقم القومي (Face ID / Login) مع ربط السجل المدني
+    // 2. البحث بالرقم القومي (Face ID / Login)
     static async findByNationalId(nationalId) {
         const query = `
             SELECT c.*, cr.full_name, cr.governorate_name, cr.unit_name 
@@ -42,7 +42,7 @@ class Candidate {
         return rows[0];
     }
 
-    // 3. البحث بالبريد الإلكتروني مع ربط السجل المدني
+    // 3. البحث بالبريد الإلكتروني
     static async findByEmail(email) {
         const query = `
             SELECT c.*, cr.full_name, cr.governorate_name, cr.unit_name 
@@ -54,8 +54,12 @@ class Candidate {
         return rows[0];
     }
 
-    // 4. جلب البروفايل الكامل (خاص بشاشة تفاصيل المرشح في الموبايل)
+    // 4. جلب البروفايل الكامل (مع معالجة احتمال الـ ID غير الرقمي)
     static async getFullProfile(candidateId) {
+        // تأكد أن candidateId رقم صحيح لتجنب خطأ الـ SQL
+        const cleanId = parseInt(candidateId);
+        if (isNaN(cleanId)) return null;
+
         const query = `
             SELECT 
                 c.candidate_id, 
@@ -67,12 +71,12 @@ class Candidate {
                 c.candidate_type,
                 c.election_symbol_url,
                 c.personal_photos_url,
-                EXTRACT(YEAR FROM AGE(cr.birth_date)) as age
+                EXTRACT(YEAR FROM AGE(cr.birth_date))::INT as age
             FROM candidates c
             JOIN civil_registry cr ON c.national_id = cr.national_id
             WHERE c.candidate_id = $1
         `;
-        const { rows } = await pool.query(query, [candidateId]);
+        const { rows } = await pool.query(query, [cleanId]);
         return rows[0];
     }
 }
