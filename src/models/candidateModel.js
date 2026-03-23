@@ -55,7 +55,7 @@ class Candidate {
     }
 
     // 4. جلب البروفايل الكامل (مع معالجة احتمال الـ ID غير الرقمي)
-    static async getFullProfile(candidateId) {
+   static async getFullProfile(candidateId) {
     try {
         const cleanId = parseInt(candidateId);
         if (isNaN(cleanId)) return null;
@@ -71,21 +71,23 @@ class Candidate {
                 cr.full_name, 
                 cr.governorate_name, 
                 cr.unit_name,
-                -- حساب السن مع معالجة القيم الفارغة
+                -- حساب السن بأمان
                 CASE 
                     WHEN cr.birth_date IS NOT NULL THEN EXTRACT(YEAR FROM AGE(cr.birth_date))::INT 
                     ELSE 0 
                 END as age
             FROM candidates c
+            -- الـ TRIM والـ LEFT JOIN هما اللي هيحلوا المشكلة
             LEFT JOIN civil_registry cr ON TRIM(c.national_id) = TRIM(cr.national_id)
             WHERE c.candidate_id = $1
         `;
         
         const { rows } = await pool.query(query, [cleanId]);
         
-        if (rows.length === 0) return null;
+        if (rows.length === 0) return null; // لو مفيش مرشح أصلاً بالـ ID ده
         return rows[0];
     } catch (err) {
+        // ده السطر اللي هيظهرلك المشكلة الحقيقية لو حصلت في الـ Logs
         console.error("DATABASE_ERROR_LOG:", err.message);
         throw err;
     }
