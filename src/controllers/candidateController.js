@@ -146,31 +146,16 @@ exports.loginCandidate = async (req, res) => {
 
 // --- 3. جلب بيانات صفحة المرشح التفصيلية (Profile Page) ---
 exports.getCandidateProfile = async (req, res) => {
-    const { id } = req.params;
+    const { id } = req.params; // بناخد الـ id من الرابط مباشرة
     try {
-        const query = `
-            SELECT 
-                cr.full_name, 
-                c.short_bio, 
-                c.degree, 
-                cr.governorate_name, 
-                c.candidate_type,
-                c.election_symbol_url,
-                EXTRACT(YEAR FROM AGE(cr.birth_date)) as age
-            FROM candidates c
-            JOIN civil_registry cr ON c.national_id = cr.national_id
-            WHERE c.candidate_id = $1
-        `;
-        const result = await pool.query(query, [id]);
+        const profile = await Candidate.getFullProfile(id);
+        if (!profile) return res.status(404).json({ success: false, message: "المرشح غير موجود" });
         
-        if (result.rows.length === 0) return res.status(404).json({ success: false, message: "المرشح غير موجود" });
-
-        res.json({ success: true, data: result.rows[0] });
+        res.json({ success: true, data: profile });
     } catch (err) {
-        res.status(500).json({ success: false, message: "خطأ في جلب بيانات المرشح" });
+        res.status(500).json({ success: false, message: "خطأ في السيرفر" });
     }
 };
-
 // --- 4. عرض قائمة المرشحين ---
 exports.listCandidates = async (req, res) => {
     try {

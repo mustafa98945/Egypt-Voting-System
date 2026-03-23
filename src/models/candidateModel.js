@@ -1,7 +1,7 @@
 const pool = require('../config/db');
 
 class Candidate {
-    // 1. دالة إنشاء مرشح جديد (كما هي مع إضافة RETURNING)
+    // 1. إنشاء مرشح جديد مع إرجاع كافة البيانات بعد الإدخال
     static async create(data) {
         const query = `
             INSERT INTO candidates (
@@ -16,7 +16,8 @@ class Candidate {
         `;
 
         const values = [
-            data.national_id, data.email, data.password, data.phone_numbers,
+            data.national_id, data.email, data.password, 
+            Array.isArray(data.phone_numbers) ? data.phone_numbers : [data.phone_numbers],
             data.short_bio, data.candidate_type, data.occupation, data.degree,
             data.birth_date, data.expiry_date, data.personal_photos_url,
             data.national_id_card_url, data.education_url, data.military_service_url,
@@ -29,7 +30,7 @@ class Candidate {
         return rows[0];
     }
 
-    // 2. دالة البحث بالرقم القومي مع جلب بيانات السجل المدني (مهمة للـ Login والـ Face ID)
+    // 2. البحث بالرقم القومي (Face ID / Login) مع ربط السجل المدني
     static async findByNationalId(nationalId) {
         const query = `
             SELECT c.*, cr.full_name, cr.governorate_name, cr.unit_name 
@@ -41,7 +42,7 @@ class Candidate {
         return rows[0];
     }
 
-    // 3. دالة البحث بالإيميل (للدخول التقليدي)
+    // 3. البحث بالبريد الإلكتروني مع ربط السجل المدني
     static async findByEmail(email) {
         const query = `
             SELECT c.*, cr.full_name, cr.governorate_name, cr.unit_name 
@@ -53,7 +54,7 @@ class Candidate {
         return rows[0];
     }
 
-    // 4. دالة جلب البروفايل الكامل (لأجل صفحة التفاصيل في Figma)
+    // 4. جلب البروفايل الكامل (خاص بشاشة تفاصيل المرشح في الموبايل)
     static async getFullProfile(candidateId) {
         const query = `
             SELECT 

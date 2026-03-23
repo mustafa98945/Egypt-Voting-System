@@ -15,6 +15,7 @@ router.get('/list', auth, candidateController.listCandidates);
 
 // 4. جلب بيانات مرشح معين بالتفصيل (Protected - محتاج Token)
 // 💡 دي الـ Endpoint اللي هتعرض الصفحة اللي على الشمال في الـ Figma
-router.get('/profile/:id', auth, candidateController.getCandidateProfile);
+// أي حد يقدر يشوف بروفايل المرشح بالـ id بتاعه
+router.get('/profile/:id', candidateController.getCandidateProfile);
 
 module.exports = router;
