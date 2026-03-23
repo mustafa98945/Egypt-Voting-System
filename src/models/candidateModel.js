@@ -1,7 +1,7 @@
 const pool = require('../config/db');
 
 class Candidate {
-    // دالة إنشاء مرشح جديد
+    // 1. دالة إنشاء مرشح جديد (كما هي مع إضافة RETURNING)
     static async create(data) {
         const query = `
             INSERT INTO candidates (
@@ -29,10 +29,49 @@ class Candidate {
         return rows[0];
     }
 
-    // دالة البحث بالرقم القومي (للدخول بالوجه أو العادي)
+    // 2. دالة البحث بالرقم القومي مع جلب بيانات السجل المدني (مهمة للـ Login والـ Face ID)
     static async findByNationalId(nationalId) {
-        const query = 'SELECT * FROM candidates WHERE national_id = $1';
+        const query = `
+            SELECT c.*, cr.full_name, cr.governorate_name, cr.unit_name 
+            FROM candidates c
+            JOIN civil_registry cr ON c.national_id = cr.national_id
+            WHERE c.national_id = $1
+        `;
         const { rows } = await pool.query(query, [nationalId]);
+        return rows[0];
+    }
+
+    // 3. دالة البحث بالإيميل (للدخول التقليدي)
+    static async findByEmail(email) {
+        const query = `
+            SELECT c.*, cr.full_name, cr.governorate_name, cr.unit_name 
+            FROM candidates c
+            JOIN civil_registry cr ON c.national_id = cr.national_id
+            WHERE c.email = $1
+        `;
+        const { rows } = await pool.query(query, [email]);
+        return rows[0];
+    }
+
+    // 4. دالة جلب البروفايل الكامل (لأجل صفحة التفاصيل في Figma)
+    static async getFullProfile(candidateId) {
+        const query = `
+            SELECT 
+                c.candidate_id, 
+                cr.full_name, 
+                c.short_bio, 
+                c.degree, 
+                cr.governorate_name, 
+                cr.unit_name,
+                c.candidate_type,
+                c.election_symbol_url,
+                c.personal_photos_url,
+                EXTRACT(YEAR FROM AGE(cr.birth_date)) as age
+            FROM candidates c
+            JOIN civil_registry cr ON c.national_id = cr.national_id
+            WHERE c.candidate_id = $1
+        `;
+        const { rows } = await pool.query(query, [candidateId]);
         return rows[0];
     }
 }

@@ -1,7 +1,7 @@
 const pool = require('../config/db');
 
 class Voter {
-    // 1. التأكد من بيانات المواطن في السجل المدني (الخطوة الصفرية)
+    // 1. التأكد من بيانات المواطن في السجل المدني
     static async verifyInRegistry(national_id, birth_date, expiry_date) {
         const result = await pool.query(
             "SELECT * FROM civil_registry WHERE national_id = $1 AND birth_date = $2 AND expiry_date = $3",
@@ -10,16 +10,25 @@ class Voter {
         return result.rows[0];
     }
 
-    // 2. البحث عن ناخب مسجل (يدعم الدخول بالإيميل أو الرقم القومي/الوجه)
-    static async findByIdentifier(identifier, isFaceLogin) {
+    // 2. البحث عن ناخب مسجل (يدعم: الإيميل، الرقم القومي، أو الـ ID)
+    static async findByIdentifier(identifier, type) {
         let queryText;
-        if (isFaceLogin) {
-            // بحث بالرقم القومي (بصمة الوجه) - بنجيب بيانات السجل المدني معاه
+        
+        // تعديل ذكي للبحث حسب نوع البيانات المتاحة
+        if (type === 'face') {
+            // بحث بالرقم القومي (Face Login)
             queryText = `
                 SELECT v.*, cr.full_name, cr.governorate_name, cr.unit_name 
                 FROM voters v 
                 JOIN civil_registry cr ON v.national_id = cr.national_id 
                 WHERE v.national_id = $1`;
+        } else if (type === 'id') {
+            // بحث بالـ ID (مهم جداً لصفحة الـ Voter Card والـ Auth)
+            queryText = `
+                SELECT v.*, cr.full_name, cr.governorate_name, cr.unit_name 
+                FROM voters v 
+                JOIN civil_registry cr ON v.national_id = cr.national_id 
+                WHERE v.voter_id = $1`;
         } else {
             // بحث بالإيميل (الدخول التقليدي)
             queryText = `
@@ -33,11 +42,11 @@ class Voter {
         return result.rows[0];
     }
 
-    // 3. إنشاء حساب ناخب جديد (بيستلم الروابط الجاهزة من الـ Controller)
+    // 3. إنشاء حساب ناخب جديد
     static async create(data) {
         const { national_id, email, password, party_card_url } = data;
         
-        // استخدام RETURNING * عشان نرجع بيانات الناخب بعد الكريات فوراً لو محتاجينها
+        // ملاحظة: الـ v_code بيتم توليده تلقائياً في قاعدة البيانات لو إنت عامله Serial أو Default
         const result = await pool.query(
             `INSERT INTO voters (national_id, email, password, party_card_url) 
              VALUES ($1, $2, $3, $4) RETURNING *`,
@@ -46,7 +55,7 @@ class Voter {
         return result.rows[0];
     }
 
-    // 4. تحديث حالة التصويت (مهم جداً لجزء الـ Voting بكرة)
+    // 4. تحديث حالة التصويت
     static async markAsVoted(voter_id) {
         const result = await pool.query(
             "UPDATE voters SET has_voted = TRUE WHERE voter_id = $1 RETURNING has_voted",
@@ -55,7 +64,7 @@ class Voter {
         return result.rows[0];
     }
 
-    // 5. دالة إضافية (للتأكد من وجود البريد أو الرقم القومي قبل التسجيل)
+    // 5. التحقق من الوجود المسبق
     static async exists(national_id, email) {
         const result = await pool.query(
             "SELECT voter_id FROM voters WHERE national_id = $1 OR email = $2",

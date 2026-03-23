@@ -85,3 +85,26 @@ exports.login = async (req, res) => {
         res.status(500).json({ success: false, message: "خطأ في الدخول" }); 
     }
 };
+
+// 4. جلب بيانات بطاقة الناخب (Voter Card) - مخصوص لـ Figma
+exports.getVoterCard = async (req, res) => {
+    try {
+        const { id } = req.user; // الـ ID جاي من الـ Token (authMiddleware)
+        const user = await Voter.findByIdentifier(id, false); // تعديل بسيط في الموديل للبحث بـ ID
+
+        if (!user) return res.status(404).json({ success: false, message: "الناخب غير موجود" });
+
+        res.status(200).json({
+            success: true,
+            data: {
+                full_name: user.full_name,
+                v_code: user.v_code, // الكود الموجود في التصميم
+                national_id: user.national_id,
+                governorate: user.governorate_name,
+                unit: user.unit_name
+            }
+        });
+    } catch (err) {
+        res.status(500).json({ success: false, message: "خطأ في جلب بيانات البطاقة" });
+    }
+};
