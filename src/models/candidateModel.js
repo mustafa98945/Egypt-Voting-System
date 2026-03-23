@@ -30,66 +30,63 @@ class Candidate {
         return rows[0];
     }
 
-    // 2. البحث بالرقم القومي (Face ID / Login)
+    // 2. البحث بالرقم القومي (Face ID / Login) - محدث بـ TRIM
     static async findByNationalId(nationalId) {
         const query = `
             SELECT c.*, cr.full_name, cr.governorate_name, cr.unit_name 
             FROM candidates c
-            JOIN civil_registry cr ON c.national_id = cr.national_id
-            WHERE c.national_id = $1
+            JOIN civil_registry cr ON TRIM(c.national_id) = TRIM(cr.national_id)
+            WHERE TRIM(c.national_id) = TRIM($1)
         `;
         const { rows } = await pool.query(query, [nationalId]);
         return rows[0];
     }
 
-    // 3. البحث بالبريد الإلكتروني
+    // 3. البحث بالبريد الإلكتروني - محدث بـ TRIM
     static async findByEmail(email) {
         const query = `
             SELECT c.*, cr.full_name, cr.governorate_name, cr.unit_name 
             FROM candidates c
-            JOIN civil_registry cr ON c.national_id = cr.national_id
+            JOIN civil_registry cr ON TRIM(c.national_id) = TRIM(cr.national_id)
             WHERE c.email = $1
         `;
         const { rows } = await pool.query(query, [email]);
         return rows[0];
     }
 
-    // 4. جلب البروفايل الكامل (مع معالجة احتمال الـ ID غير الرقمي)
-   static async getFullProfile(candidateId) {
-    try {
-        const cleanId = parseInt(candidateId);
-        if (isNaN(cleanId)) return null;
+    // 4. جلب البروفايل الكامل (بدون أصوات كما طلبت)
+    static async getFullProfile(candidateId) {
+        try {
+            const cleanId = parseInt(candidateId);
+            if (isNaN(cleanId)) return null;
 
-        const query = `
-    SELECT 
-        c.candidate_id, 
-        c.short_bio,        -- السيرة الذاتية هنا
-        c.degree, 
-        c.candidate_type,
-        c.election_symbol_url,
-        c.personal_photos_url,
-        cr.full_name, 
-        cr.governorate_name, 
-        cr.unit_name,
-        CASE 
-            WHEN cr.birth_date IS NOT NULL THEN EXTRACT(YEAR FROM AGE(cr.birth_date))::INT 
-            ELSE 0 
-        END as age
-    FROM candidates c
-    LEFT JOIN civil_registry cr ON TRIM(c.national_id) = TRIM(cr.national_id)
-    WHERE c.candidate_id = $1
-`;
-        
-        const { rows } = await pool.query(query, [cleanId]);
-        
-        if (rows.length === 0) return null; // لو مفيش مرشح أصلاً بالـ ID ده
-        return rows[0];
-    } catch (err) {
-        // ده السطر اللي هيظهرلك المشكلة الحقيقية لو حصلت في الـ Logs
-        console.error("DATABASE_ERROR_LOG:", err.message);
-        throw err;
+            const query = `
+                SELECT 
+                    c.candidate_id, 
+                    c.short_bio, 
+                    c.degree, 
+                    c.candidate_type,
+                    c.election_symbol_url,
+                    c.personal_photos_url,
+                    cr.full_name, 
+                    cr.governorate_name, 
+                    cr.unit_name,
+                    CASE 
+                        WHEN cr.birth_date IS NOT NULL THEN EXTRACT(YEAR FROM AGE(cr.birth_date))::INT 
+                        ELSE 0 
+                    END as age
+                FROM candidates c
+                LEFT JOIN civil_registry cr ON TRIM(c.national_id) = TRIM(cr.national_id)
+                WHERE c.candidate_id = $1
+            `;
+            
+            const { rows } = await pool.query(query, [cleanId]);
+            return rows[0];
+        } catch (err) {
+            console.error("DATABASE_ERROR_LOG:", err.message);
+            throw err;
+        }
     }
-}
 }
 
 module.exports = Candidate;

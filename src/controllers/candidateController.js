@@ -161,14 +161,23 @@ exports.getCandidateProfile = async (req, res) => {
 exports.listCandidates = async (req, res) => {
     try {
         const query = `
-            SELECT c.candidate_id, cr.full_name, c.occupation, c.candidate_type 
+            SELECT 
+                c.candidate_id, 
+                cr.full_name, 
+                c.occupation, 
+                c.candidate_type,
+                -- جلب أول صورة فقط للعرض في القائمة
+                c.personal_photos_url[1] as image_url, 
+                c.election_symbol_url
             FROM candidates c
-            JOIN civil_registry cr ON c.national_id = cr.national_id
+            -- استخدام LEFT JOIN و TRIM لضمان ظهور البيانات حتى لو فيه مشكلة في الرقم القومي
+            LEFT JOIN civil_registry cr ON TRIM(c.national_id) = TRIM(cr.national_id)
             ORDER BY c.created_at DESC
         `;
         const result = await pool.query(query);
         res.json({ success: true, data: result.rows });
     } catch (err) {
+        console.error("LIST_ERROR:", err.message);
         res.status(500).json({ success: false, message: "خطأ في تحميل القائمة" });
     }
 };
