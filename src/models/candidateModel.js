@@ -60,31 +60,34 @@ class Candidate {
         const cleanId = parseInt(candidateId);
         if (isNaN(cleanId)) return null;
 
-        // استخدمنا الـ Alias (c و cr) للتأكد من عدم تضارب الأسماء
         const query = `
             SELECT 
                 c.candidate_id, 
-                cr.full_name, 
                 c.short_bio, 
                 c.degree, 
-                cr.governorate_name, 
-                cr.unit_name,
                 c.candidate_type,
                 c.election_symbol_url,
                 c.personal_photos_url,
-                -- قمنا بإضافة COALESCE للتأكد إنه لو مفيش تاريخ ميلاد السيرفر ميعملش Crash
-                COALESCE(EXTRACT(YEAR FROM AGE(cr.birth_date))::INT, 0) as age
+                cr.full_name, 
+                cr.governorate_name, 
+                cr.unit_name,
+                -- حساب السن مع معالجة القيم الفارغة
+                CASE 
+                    WHEN cr.birth_date IS NOT NULL THEN EXTRACT(YEAR FROM AGE(cr.birth_date))::INT 
+                    ELSE 0 
+                END as age
             FROM candidates c
-            INNER JOIN civil_registry cr ON c.national_id = cr.national_id
+            LEFT JOIN civil_registry cr ON TRIM(c.national_id) = TRIM(cr.national_id)
             WHERE c.candidate_id = $1
         `;
         
         const { rows } = await pool.query(query, [cleanId]);
+        
+        if (rows.length === 0) return null;
         return rows[0];
     } catch (err) {
-        // ده هيخلي الخطأ يظهر لك في الـ Logs بتاعة Render بالظبط
-        console.error("Database Query Error:", err.message);
-        throw err; 
+        console.error("DATABASE_ERROR_LOG:", err.message);
+        throw err;
     }
 }
 }
