@@ -61,26 +61,24 @@ class Candidate {
         if (isNaN(cleanId)) return null;
 
         const query = `
-            SELECT 
-                c.candidate_id, 
-                c.short_bio, 
-                c.degree, 
-                c.candidate_type,
-                c.election_symbol_url,
-                c.personal_photos_url,
-                cr.full_name, 
-                cr.governorate_name, 
-                cr.unit_name,
-                -- حساب السن بأمان
-                CASE 
-                    WHEN cr.birth_date IS NOT NULL THEN EXTRACT(YEAR FROM AGE(cr.birth_date))::INT 
-                    ELSE 0 
-                END as age
-            FROM candidates c
-            -- الـ TRIM والـ LEFT JOIN هما اللي هيحلوا المشكلة
-            LEFT JOIN civil_registry cr ON TRIM(c.national_id) = TRIM(cr.national_id)
-            WHERE c.candidate_id = $1
-        `;
+    SELECT 
+        c.candidate_id, 
+        c.short_bio,        -- السيرة الذاتية هنا
+        c.degree, 
+        c.candidate_type,
+        c.election_symbol_url,
+        c.personal_photos_url,
+        cr.full_name, 
+        cr.governorate_name, 
+        cr.unit_name,
+        CASE 
+            WHEN cr.birth_date IS NOT NULL THEN EXTRACT(YEAR FROM AGE(cr.birth_date))::INT 
+            ELSE 0 
+        END as age
+    FROM candidates c
+    LEFT JOIN civil_registry cr ON TRIM(c.national_id) = TRIM(cr.national_id)
+    WHERE c.candidate_id = $1
+`;
         
         const { rows } = await pool.query(query, [cleanId]);
         
