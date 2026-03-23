@@ -4,6 +4,7 @@ const sharp = require('sharp');
 const { uploadToSupabase } = require('../utils/supabaseHelper');
 const Voter = require('../models/voterModel');
 const pool = require('../config/db');
+const Candidate = require('../models/candidateModel'); // أضف هذا السطر فوراً
 
 // --- دالة مساعدة لمعالجة الـ Base64 ورفعها ---
 const processBase64AndUpload = async (base64String, fileName, folder = 'candidates') => {
