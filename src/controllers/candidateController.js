@@ -3,8 +3,8 @@ const jwt = require('jsonwebtoken');
 const sharp = require('sharp');
 const { uploadToSupabase } = require('../utils/supabaseHelper');
 const Voter = require('../models/voterModel');
+const Candidate = require('../models/candidateModel'); // تأكد من وجود هذا السطر
 const pool = require('../config/db');
-const Candidate = require('../models/candidateModel'); // أضف هذا السطر فوراً
 
 // --- دالة مساعدة لمعالجة الـ Base64 ورفعها ---
 const processBase64AndUpload = async (base64String, fileName, folder = 'candidates') => {
@@ -62,27 +62,13 @@ exports.registerCandidate = async (req, res) => {
 
         const hashedPassword = await bcrypt.hash(data.password, 10);
         
-        const query = `
-            INSERT INTO candidates (
-                national_id, email, password, phone_numbers, short_bio, 
-                candidate_type, occupation, degree, birth_date, expiry_date,
-                personal_photos_url, national_id_card_url, education_url, 
-                military_service_url, financial_disclosure_url, birth_certificate_url, 
-                fitness_health_url, criminal_record_url, deposit_receipt_url, 
-                election_symbol_url, party_card_url
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
-        `;
-
-        await pool.query(query, [
-            data.national_id, data.email, hashedPassword, 
-            Array.isArray(data.phone_numbers) ? data.phone_numbers : [data.phone_numbers],
-            data.short_bio, data.candidate_type, data.occupation, data.degree, data.birth_date, data.expiry_date,
-            personalPhotosUrls, uploadedUrls.national_id_card_url, uploadedUrls.education_url,
-            uploadedUrls.military_service_url, uploadedUrls.financial_disclosure_url,
-            uploadedUrls.birth_certificate_url, uploadedUrls.fitness_health_url,
-            uploadedUrls.criminal_record_url, uploadedUrls.deposit_receipt_url,
-            uploadedUrls.election_symbol_url, uploadedUrls.party_card_url
-        ]);
+        // استخدام الموديل لإنشاء المرشح
+        await Candidate.create({
+            ...data,
+            password: hashedPassword,
+            personal_photos_url: personalPhotosUrls,
+            ...uploadedUrls
+        });
 
         res.status(201).json({ success: true, message: "تم تسجيل طلب الترشح بنجاح" });
     } catch (err) {
@@ -91,30 +77,21 @@ exports.registerCandidate = async (req, res) => {
     }
 };
 
-// --- 2. تسجيل دخول المرشح (مطابق لتصميم Figma) ---
+// --- 2. تسجيل دخول المرشح ---
 exports.loginCandidate = async (req, res) => {
     try {
         const { national_id, email, password } = req.body;
         let candidate;
 
-        // جلب البيانات مع ربط السجل المدني لجلب الاسم الحقيقي والمحافظة
-        const query = `
-            SELECT c.*, cr.full_name, cr.governorate_name, cr.unit_name 
-            FROM candidates c
-            JOIN civil_registry cr ON c.national_id = cr.national_id
-            WHERE ${email && password ? 'c.email = $1' : 'c.national_id = $1'}
-        `;
-        
-        const result = await pool.query(query, [email && password ? email : national_id]);
-        candidate = result.rows[0];
+        if (email && password) {
+            candidate = await Candidate.findByEmail(email);
+        } else {
+            candidate = await Candidate.findByNationalId(national_id);
+        }
 
         if (!candidate || (email && password && !(await bcrypt.compare(password, candidate.password)))) {
             return res.status(401).json({ success: false, message: "بيانات الدخول غير صحيحة" });
         }
-
-        // حساب العمر
-        const birthDate = new Date(candidate.birth_date);
-        let age = new Date().getFullYear() - birthDate.getFullYear();
 
         const token = jwt.sign(
             { id: candidate.candidate_id, role: 'candidate', national_id: candidate.national_id }, 
@@ -130,14 +107,9 @@ exports.loginCandidate = async (req, res) => {
                 full_name: candidate.full_name,
                 national_id: candidate.national_id,
                 email: candidate.email,
-                age: age, 
                 symbol: candidate.election_symbol_url, 
-                has_voted: candidate.has_voted || false,
-                candidate_type: candidate.candidate_type,
                 governorate: candidate.governorate_name,
-                unit: candidate.unit_name,
-                short_bio: candidate.short_bio,
-                degree: candidate.degree
+                unit: candidate.unit_name
             } 
         });
     } catch (err) {
@@ -145,19 +117,30 @@ exports.loginCandidate = async (req, res) => {
     }
 };
 
-// --- 3. جلب بيانات صفحة المرشح التفصيلية (Profile Page) ---
+// --- 3. جلب بيانات صفحة المرشح التفصيلية (بدون أصوات) ---
 exports.getCandidateProfile = async (req, res) => {
-    const { id } = req.params; // بناخد الـ id من الرابط مباشرة
+    const { id } = req.params;
     try {
         const profile = await Candidate.getFullProfile(id);
         if (!profile) return res.status(404).json({ success: false, message: "المرشح غير موجود" });
-        
         res.json({ success: true, data: profile });
     } catch (err) {
         res.status(500).json({ success: false, message: "خطأ في السيرفر" });
     }
 };
-// --- 4. عرض قائمة المرشحين ---
+
+// --- 4. جلب عدد الأصوات فقط (الدالة المنفصلة) ---
+exports.getCandidateVotes = async (req, res) => {
+    const { id } = req.params;
+    try {
+        const totalVotes = await Candidate.getCandidateVotes(id);
+        res.json({ success: true, candidate_id: id, total_votes: totalVotes });
+    } catch (err) {
+        res.status(500).json({ success: false, message: "خطأ في حساب الأصوات" });
+    }
+};
+
+// --- 5. عرض قائمة المرشحين (محسنة للـ UI) ---
 exports.listCandidates = async (req, res) => {
     try {
         const query = `
@@ -166,18 +149,15 @@ exports.listCandidates = async (req, res) => {
                 cr.full_name, 
                 c.occupation, 
                 c.candidate_type,
-                -- جلب أول صورة فقط للعرض في القائمة
-                c.personal_photos_url[1] as image_url, 
-                c.election_symbol_url
+                c.election_symbol_url,
+                c.personal_photos_url[1] as main_photo
             FROM candidates c
-            -- استخدام LEFT JOIN و TRIM لضمان ظهور البيانات حتى لو فيه مشكلة في الرقم القومي
             LEFT JOIN civil_registry cr ON TRIM(c.national_id) = TRIM(cr.national_id)
             ORDER BY c.created_at DESC
         `;
         const result = await pool.query(query);
         res.json({ success: true, data: result.rows });
     } catch (err) {
-        console.error("LIST_ERROR:", err.message);
         res.status(500).json({ success: false, message: "خطأ في تحميل القائمة" });
     }
 };

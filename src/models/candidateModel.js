@@ -1,7 +1,7 @@
 const pool = require('../config/db');
 
 class Candidate {
-    // 1. إنشاء مرشح جديد
+    // 1. إنشاء مرشح جديد (لعملية التسجيل)
     static async create(data) {
         const query = `
             INSERT INTO candidates (
@@ -30,7 +30,7 @@ class Candidate {
         return rows[0];
     }
 
-    // 2. البحث بالرقم القومي (Face ID / Login) - محدث بـ TRIM
+    // 2. البحث بالرقم القومي (Face ID / Login)
     static async findByNationalId(nationalId) {
         const query = `
             SELECT c.*, cr.full_name, cr.governorate_name, cr.unit_name 
@@ -42,7 +42,7 @@ class Candidate {
         return rows[0];
     }
 
-    // 3. البحث بالبريد الإلكتروني - محدث بـ TRIM
+    // 3. البحث بالبريد الإلكتروني
     static async findByEmail(email) {
         const query = `
             SELECT c.*, cr.full_name, cr.governorate_name, cr.unit_name 
@@ -54,7 +54,7 @@ class Candidate {
         return rows[0];
     }
 
-    // 4. جلب البروفايل الكامل (بدون أصوات كما طلبت)
+    // 4. جلب البروفايل الكامل (بيانات تعريفية فقط - بدون أصوات)
     static async getFullProfile(candidateId) {
         try {
             const cleanId = parseInt(candidateId);
@@ -84,6 +84,22 @@ class Candidate {
             return rows[0];
         } catch (err) {
             console.error("DATABASE_ERROR_LOG:", err.message);
+            throw err;
+        }
+    }
+
+    // 5. دالة منفصلة لجلب عدد الأصوات فقط (تحديث Live)
+    static async getCandidateVotes(candidateId) {
+        try {
+            const query = `
+                SELECT COUNT(*)::INT as total_votes 
+                FROM votes 
+                WHERE candidate_id = $1
+            `;
+            const { rows } = await pool.query(query, [candidateId]);
+            return rows[0].total_votes || 0;
+        } catch (err) {
+            console.error("VOTES_COUNT_ERROR:", err.message);
             throw err;
         }
     }
