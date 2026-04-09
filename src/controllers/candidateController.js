@@ -21,6 +21,7 @@ const processBase64AndUpload = async (base64String, fileName, folder = 'candidat
                 .toBuffer();
             return await uploadToSupabase(optimized, fileName, folder);
         } catch (sharpError) {
+            // لو sharp فشل لأي سبب، نرفع الـ buffer الأصلي
             return await uploadToSupabase(buffer, fileName, folder);
         }
     } catch (error) {
@@ -48,7 +49,7 @@ exports.registerCandidate = async (req, res) => {
             });
         }
 
-        // الخطوة 2: معالجة الـ 5 ملفات الانتخابية فقط
+        // الخطوة 2: معالجة الـ 5 ملفات الانتخابية ورفعهم (عشان تطلع روابط حقيقية)
         const candidateElectionFiles = [
             'election_symbol_url', 
             'financial_disclosure_url', 
@@ -60,17 +61,19 @@ exports.registerCandidate = async (req, res) => {
         let uploadedUrls = {};
         for (const field of candidateElectionFiles) {
             if (data[field]) {
-                uploadedUrls[field] = await processBase64AndUpload(
-                    data[field], 
-                    `${field}_${data.national_id}_${Date.now()}.jpg`
-                );
+                const fileName = `${field}_${data.national_id}_${Date.now()}.jpg`;
+                const publicUrl = await processBase64AndUpload(data[field], fileName);
+                if (publicUrl) {
+                    uploadedUrls[field] = publicUrl; // هنا بنخزن الرابط الحقيقي من Supabase
+                }
             }
         }
 
         const hashedPassword = await bcrypt.hash(data.password, 10);
         
-        // الخطوة 3: تجميع البيانات النهائية (دمج بيانات السجل مع بيانات المرشح)
+        // الخطوة 3: تجميع البيانات النهائية
         const fullCandidateData = {
+            // بيانات السجل المدني
             username: citizen.username,
             governorate_name: citizen.governorate, 
             address_details: citizen.address,   
@@ -84,6 +87,8 @@ exports.registerCandidate = async (req, res) => {
             criminal_record_url: citizen.criminal_record_url,
             national_id_front_url: citizen.national_id_front_url, 
             national_id_back_url: citizen.national_id_back_url,
+            
+            // بيانات الإدخال
             email: data.email,
             password: hashedPassword,
             national_id: data.national_id,
@@ -93,30 +98,38 @@ exports.registerCandidate = async (req, res) => {
             occupation: data.occupation,
             candidate_type: data.candidate_type,
             short_bio: data.short_bio,
+
+            // دمج روابط الرفع الحقيقية (بتعمل Override لو فيه أي روابط قديمة)
             ...uploadedUrls
         };
 
         const newCandidate = await Candidate.create(fullCandidateData);
 
-        // --- التعديل هنا: إرجاع كائن البيانات كامل لملء الصفحة تلقائياً ---
+        // المخرجات المطلوبة لملء الصفحة تلقائياً مع الروابط الحقيقية
         res.status(201).json({ 
             success: true, 
             message: "تم التحقق من السجل وسحب الأوراق الموثقة بنجاح",
             data: {
                 candidate_id: newCandidate.candidate_id,
-                username: newCandidate.username,           // الاسم الكامل
-                governorate_name: newCandidate.governorate_name, // المحافظة
-                address_details: newCandidate.address_details,   // العنوان
-                unit_name: newCandidate.unit_name,         // المركز/القسم
-                degree: newCandidate.degree,               // المؤهل
-                age: newCandidate.age,                     // السن
-                gender: newCandidate.gender,               // النوع
+                username: newCandidate.username,
+                governorate_name: newCandidate.governorate_name,
+                address_details: newCandidate.address_details,
+                unit_name: newCandidate.unit_name,
+                degree: newCandidate.degree,
+                age: newCandidate.age,
+                gender: newCandidate.gender,
                 email: newCandidate.email,
                 national_id: newCandidate.national_id,
                 phone_number: newCandidate.phone_number,
                 occupation: newCandidate.occupation,
                 candidate_type: newCandidate.candidate_type,
-                // إرجاع روابط الملفات أيضاً للاكتمال
+                // الروابط الـ 5 المرفوعة حديثاً
+                election_symbol_url: newCandidate.election_symbol_url,
+                personal_photos_url: newCandidate.personal_photos_url,
+                financial_disclosure_url: newCandidate.financial_disclosure_url,
+                fitness_health_url: newCandidate.fitness_health_url,
+                deposit_receipt_url: newCandidate.deposit_receipt_url,
+                // روابط السجل المدني
                 military_service_url: newCandidate.military_service_url,
                 education_url: newCandidate.education_url,
                 birth_certificate_url: newCandidate.birth_certificate_url,
@@ -130,7 +143,7 @@ exports.registerCandidate = async (req, res) => {
     }
 };
 
-// --- باقي الدوال (Login, Profile, Votes, List) كما هي ---
+// --- تسجيل دخول المرشح ---
 exports.loginCandidate = async (req, res) => {
     try {
         const { national_id, email, password } = req.body;
@@ -160,20 +173,18 @@ exports.loginCandidate = async (req, res) => {
     }
 };
 
+// --- جلب البروفايل ---
 exports.getCandidateProfile = async (req, res) => {
     try {
         const profile = await Candidate.getFullProfile(req.params.id);
         if (!profile) return res.status(404).json({ success: false, message: "المرشح غير موجود" });
-
-        res.json({ 
-            success: true, 
-            data: profile 
-        });
+        res.json({ success: true, data: profile });
     } catch (err) {
         res.status(500).json({ success: false, message: "خطأ في جلب البيانات" });
     }
 };
 
+// --- عداد الأصوات ---
 exports.getCandidateVotes = async (req, res) => {
     try {
         const totalVotes = await Candidate.getCandidateVotes(req.params.id);
@@ -183,6 +194,7 @@ exports.getCandidateVotes = async (req, res) => {
     }
 };
 
+// --- قائمة المرشحين ---
 exports.listCandidates = async (req, res) => {
     try {
         const query = `
