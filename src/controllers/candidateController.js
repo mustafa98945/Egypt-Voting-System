@@ -34,7 +34,7 @@ exports.registerCandidate = async (req, res) => {
     try {
         const data = req.body;
 
-        // الخطوة 1: الـ Triple Check وسحب بيانات السجل المدني (المصدر الموثوق للأوراق الرسمية)
+        // الخطوة 1: الـ Triple Check وسحب بيانات السجل المدني
         const citizen = await Candidate.verifyRegistry(
             data.national_id, 
             data.birth_date, 
@@ -48,7 +48,7 @@ exports.registerCandidate = async (req, res) => {
             });
         }
 
-        // الخطوة 2: معالجة الـ 5 ملفات الانتخابية فقط (اللي المرشح بيرفعهم بنفسه)
+        // الخطوة 2: معالجة الـ 5 ملفات الانتخابية فقط
         const candidateElectionFiles = [
             'election_symbol_url', 
             'financial_disclosure_url', 
@@ -71,24 +71,19 @@ exports.registerCandidate = async (req, res) => {
         
         // الخطوة 3: تجميع البيانات النهائية (دمج بيانات السجل مع بيانات المرشح)
         const fullCandidateData = {
-            // بيانات مسحوبة أوتوماتيكياً من السجل المدني (نصوص وروابط صور موثقة)
             username: citizen.username,
-            governorate_name: citizen.governorate, // من السجل
-            address_details: citizen.address,     // من السجل
-            unit_name: citizen.administrative_unit, // من السجل
+            governorate_name: citizen.governorate, 
+            address_details: citizen.address,   
+            unit_name: citizen.administrative_unit, 
             degree: citizen.degree,
             age: citizen.age,
             gender: citizen.gender,
-            
-            // روابط الأوراق الرسمية المسحوبة من السجل (مش هنخزنها تاني، هنسجلها كمرجع)
             military_service_url: citizen.military_service_url,
             education_url: citizen.education_qualification_url,
             birth_certificate_url: citizen.birth_certificate_url,
             criminal_record_url: citizen.criminal_record_url,
             national_id_front_url: citizen.national_id_front_url, 
             national_id_back_url: citizen.national_id_back_url,
-
-            // بيانات مدخلة من شاشة التسجيل (جديدة)
             email: data.email,
             password: hashedPassword,
             national_id: data.national_id,
@@ -98,20 +93,34 @@ exports.registerCandidate = async (req, res) => {
             occupation: data.occupation,
             candidate_type: data.candidate_type,
             short_bio: data.short_bio,
-
-            // الملفات الـ 5 المرفوعة للترشح
             ...uploadedUrls
         };
 
         const newCandidate = await Candidate.create(fullCandidateData);
 
+        // --- التعديل هنا: إرجاع كائن البيانات كامل لملء الصفحة تلقائياً ---
         res.status(201).json({ 
             success: true, 
             message: "تم التحقق من السجل وسحب الأوراق الموثقة بنجاح",
             data: {
                 candidate_id: newCandidate.candidate_id,
-                username: newCandidate.username,
-                email: newCandidate.email
+                username: newCandidate.username,           // الاسم الكامل
+                governorate_name: newCandidate.governorate_name, // المحافظة
+                address_details: newCandidate.address_details,   // العنوان
+                unit_name: newCandidate.unit_name,         // المركز/القسم
+                degree: newCandidate.degree,               // المؤهل
+                age: newCandidate.age,                     // السن
+                gender: newCandidate.gender,               // النوع
+                email: newCandidate.email,
+                national_id: newCandidate.national_id,
+                phone_number: newCandidate.phone_number,
+                occupation: newCandidate.occupation,
+                candidate_type: newCandidate.candidate_type,
+                // إرجاع روابط الملفات أيضاً للاكتمال
+                military_service_url: newCandidate.military_service_url,
+                education_url: newCandidate.education_url,
+                birth_certificate_url: newCandidate.birth_certificate_url,
+                criminal_record_url: newCandidate.criminal_record_url
             }
         });
 
@@ -121,7 +130,7 @@ exports.registerCandidate = async (req, res) => {
     }
 };
 
-// --- 2. تسجيل دخول المرشح ---
+// --- باقي الدوال (Login, Profile, Votes, List) كما هي ---
 exports.loginCandidate = async (req, res) => {
     try {
         const { national_id, email, password } = req.body;
@@ -151,7 +160,6 @@ exports.loginCandidate = async (req, res) => {
     }
 };
 
-// --- 3. جلب البروفايل الكامل ---
 exports.getCandidateProfile = async (req, res) => {
     try {
         const profile = await Candidate.getFullProfile(req.params.id);
@@ -159,24 +167,13 @@ exports.getCandidateProfile = async (req, res) => {
 
         res.json({ 
             success: true, 
-            data: {
-                username: profile.username,
-                name: profile.full_name,
-                age: profile.age,
-                governorate: profile.governorate_name,
-                occupation: profile.occupation,
-                bio: profile.short_bio,
-                symbol_url: profile.election_symbol_url,
-                photo_url: profile.personal_photos_url,
-                type: profile.candidate_type
-            }
+            data: profile 
         });
     } catch (err) {
         res.status(500).json({ success: false, message: "خطأ في جلب البيانات" });
     }
 };
 
-// --- 4. عداد الأصوات ---
 exports.getCandidateVotes = async (req, res) => {
     try {
         const totalVotes = await Candidate.getCandidateVotes(req.params.id);
@@ -186,7 +183,6 @@ exports.getCandidateVotes = async (req, res) => {
     }
 };
 
-// --- 5. قائمة المرشحين ---
 exports.listCandidates = async (req, res) => {
     try {
         const query = `
