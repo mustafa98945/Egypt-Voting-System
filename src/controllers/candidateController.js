@@ -5,7 +5,7 @@ const { uploadToSupabase } = require('../utils/supabaseHelper');
 const Candidate = require('../models/candidateModel');
 const pool = require('../config/db');
 
-// --- دالة مساعدة لمعالجة الـ Base64 ورفعها (صور المرشح الجديدة) ---
+// --- دالة مساعدة لمعالجة الـ Base64 ورفعها ---
 const processBase64AndUpload = async (base64String, fileName, folder = 'candidates') => {
     try {
         if (!base64String || typeof base64String !== 'string') return null;
@@ -34,8 +34,7 @@ exports.registerCandidate = async (req, res) => {
     try {
         const data = req.body;
 
-        // الخطوة 1: الـ Triple Check وسحب بيانات السجل المدني الموثقة
-        // (بما فيها صور البطاقة المسجلة مسبقاً في السجل)
+        // الخطوة 1: الـ Triple Check وسحب بيانات السجل المدني (المصدر الموثوق للأوراق الرسمية)
         const citizen = await Candidate.verifyRegistry(
             data.national_id, 
             data.birth_date, 
@@ -49,8 +48,7 @@ exports.registerCandidate = async (req, res) => {
             });
         }
 
-        // الخطوة 2: معالجة الـ 5 ملفات الانتخابية فقط
-        // (شيلنا صور البطاقة من هنا لأننا هنستخدم النسخة الموثقة من السجل المدني)
+        // الخطوة 2: معالجة الـ 5 ملفات الانتخابية فقط (اللي المرشح بيرفعهم بنفسه)
         const candidateElectionFiles = [
             'election_symbol_url', 
             'financial_disclosure_url', 
@@ -71,26 +69,26 @@ exports.registerCandidate = async (req, res) => {
 
         const hashedPassword = await bcrypt.hash(data.password, 10);
         
-        // الخطوة 3: تجميع البيانات النهائية (دمج السجل مع مدخلات المرشح)
+        // الخطوة 3: تجميع البيانات النهائية (دمج بيانات السجل مع بيانات المرشح)
         const fullCandidateData = {
-            // بيانات مسحوبة أوتوماتيكياً من السجل المدني (الموثقة)
+            // بيانات مسحوبة أوتوماتيكياً من السجل المدني (نصوص وروابط صور موثقة)
             username: citizen.username,
-            governorate_name: citizen.governorate_name, 
-            address_details: citizen.address_details,   
-            unit_name: citizen.unit_name,               
+            governorate_name: citizen.governorate, // من السجل
+            address_details: citizen.address,     // من السجل
+            unit_name: citizen.administrative_unit, // من السجل
             degree: citizen.degree,
             age: citizen.age,
             gender: citizen.gender,
+            
+            // روابط الأوراق الرسمية المسحوبة من السجل (مش هنخزنها تاني، هنسجلها كمرجع)
             military_service_url: citizen.military_service_url,
             education_url: citizen.education_qualification_url,
             birth_certificate_url: citizen.birth_certificate_url,
             criminal_record_url: citizen.criminal_record_url,
-            
-            // سحب صور البطاقة "ثقة" من السجل المدني بدل رفعها مجدداً
             national_id_front_url: citizen.national_id_front_url, 
             national_id_back_url: citizen.national_id_back_url,
 
-            // بيانات مدخلة من شاشة التسجيل
+            // بيانات مدخلة من شاشة التسجيل (جديدة)
             email: data.email,
             password: hashedPassword,
             national_id: data.national_id,
@@ -100,6 +98,8 @@ exports.registerCandidate = async (req, res) => {
             occupation: data.occupation,
             candidate_type: data.candidate_type,
             short_bio: data.short_bio,
+
+            // الملفات الـ 5 المرفوعة للترشح
             ...uploadedUrls
         };
 
@@ -107,7 +107,7 @@ exports.registerCandidate = async (req, res) => {
 
         res.status(201).json({ 
             success: true, 
-            message: "تم التحقق من السجل وسحب صور البطاقة الموثقة وتسجيل المرشح بنجاح",
+            message: "تم التحقق من السجل وسحب الأوراق الموثقة بنجاح",
             data: {
                 candidate_id: newCandidate.candidate_id,
                 username: newCandidate.username,
