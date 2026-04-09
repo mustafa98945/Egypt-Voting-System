@@ -1,7 +1,7 @@
 const pool = require('../config/db');
 
 class Candidate {
-    // 1. إنشاء مرشح جديد (لعملية التسجيل)
+    // 1. إنشاء مرشح جديد (Data Entry)
     static async create(data) {
         const query = `
             INSERT INTO candidates (
@@ -10,27 +10,47 @@ class Candidate {
                 personal_photos_url, national_id_card_url, education_url, 
                 military_service_url, financial_disclosure_url, birth_certificate_url, 
                 fitness_health_url, criminal_record_url, deposit_receipt_url, 
-                election_symbol_url, party_card_url
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
+                election_symbol_url, party_card_url,
+                is_independent, political_party_name
+            ) VALUES (
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 
+                $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21,
+                $22, $23
+            )
             RETURNING *;
         `;
 
         const values = [
-            data.national_id, data.email, data.password, 
+            data.national_id, 
+            data.email, 
+            data.password, 
             Array.isArray(data.phone_numbers) ? data.phone_numbers : [data.phone_numbers],
-            data.short_bio, data.candidate_type, data.occupation, data.degree,
-            data.birth_date, data.expiry_date, data.personal_photos_url,
-            data.national_id_card_url, data.education_url, data.military_service_url,
-            data.financial_disclosure_url, data.birth_certificate_url, data.fitness_health_url,
-            data.criminal_record_url, data.deposit_receipt_url, data.election_symbol_url,
-            data.party_card_url
+            data.short_bio, 
+            data.candidate_type, 
+            data.occupation, 
+            data.degree,
+            data.birth_date, 
+            data.expiry_date, 
+            data.personal_photos_url,
+            data.national_id_card_url, 
+            data.education_url, 
+            data.military_service_url,
+            data.financial_disclosure_url, 
+            data.birth_certificate_url, 
+            data.fitness_health_url,
+            data.criminal_record_url, 
+            data.deposit_receipt_url, 
+            data.election_symbol_url,
+            data.party_card_url,
+            data.is_independent, 
+            data.political_party_name
         ];
 
         const { rows } = await pool.query(query, values);
         return rows[0];
     }
 
-    // 2. البحث بالرقم القومي (Face ID / Login)
+    // 2. البحث بالرقم القومي (Login)
     static async findByNationalId(nationalId) {
         const query = `
             SELECT c.*, cr.full_name, cr.governorate_name, cr.unit_name 
@@ -42,7 +62,7 @@ class Candidate {
         return rows[0];
     }
 
-    // 3. البحث بالبريد الإلكتروني
+    // 3. البحث بالبريد الإلكتروني (Login)
     static async findByEmail(email) {
         const query = `
             SELECT c.*, cr.full_name, cr.governorate_name, cr.unit_name 
@@ -54,7 +74,7 @@ class Candidate {
         return rows[0];
     }
 
-    // 4. جلب البروفايل الكامل (بيانات تعريفية فقط - بدون أصوات)
+    // 4. جلب البروفايل (البيانات اللي بتظهر للناخب - Figma Image 396)
     static async getFullProfile(candidateId) {
         try {
             const cleanId = parseInt(candidateId);
@@ -65,7 +85,8 @@ class Candidate {
                     c.candidate_id, 
                     c.short_bio, 
                     c.degree, 
-                    c.candidate_type,
+                    c.occupation,
+                    CASE WHEN c.is_independent THEN 'مستقل' ELSE c.political_party_name END as candidate_type,
                     c.election_symbol_url,
                     c.personal_photos_url,
                     cr.full_name, 
@@ -88,7 +109,7 @@ class Candidate {
         }
     }
 
-    // 5. دالة منفصلة لجلب عدد الأصوات فقط (تحديث Live)
+    // 5. عداد الأصوات (Live Update)
     static async getCandidateVotes(candidateId) {
         try {
             const query = `
