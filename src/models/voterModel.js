@@ -20,30 +20,18 @@ class Voter {
 }
 
     // 2. إنشاء ناخب جديد (نفس تكنيك الـ Candidate)
-    static async create(data) {
-        const query = `
-            INSERT INTO voters (
-                national_id, 
-                email, 
-                password, 
-                party_card_url, 
-                unit_id
-            ) VALUES (
-                $1, $2, $3, $4, $5
-            ) RETURNING *;
-        `;
-
-        const values = [
-            data.national_id, 
-            data.email, 
-            data.password, 
-            data.party_card_url, 
-            data.unit_id
-        ];
-
-        const { rows } = await pool.query(query, values);
-        return rows[0];
-    }
+    static async create(voterData) {
+    const { national_id, full_name, address, administrative_unit, email, password, face_token, party_card_url } = voterData;
+    
+    const query = `
+        INSERT INTO voters (national_id, full_name, address, administrative_unit, email, password, face_token, party_card_url)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        RETURNING *
+    `;
+    const values = [national_id, full_name, address, administrative_unit, email, password, face_token, party_card_url];
+    const { rows } = await pool.query(query, values);
+    return rows[0];
+}
 
     // 3. البحث بالرقم القومي (لعملية الـ Login أو بصمة الوجه)
     static async findByNationalId(nationalId) {
