@@ -1,15 +1,18 @@
-const bcrypt = require('bcryptjs'); 
+const bcrypt = require('bcryptjs');
 const sharp = require('sharp');
 const jwt = require('jsonwebtoken');
 const Voter = require('../models/voterModel');
 const { uploadToSupabase } = require('../utils/supabaseHelper');
 
-// --- دالة معالجة الصور (بصمة الوجه أو بطاقة الحزب) ---
+// --- دالة معالجة الصور (بطاقة الحزب أو بصمة الوجه) ---
 const processBase64AndUpload = async (base64String, fileName, folder = 'voters') => {
     try {
         if (!base64String) return null;
+        // تنظيف الـ base64 string من الرأس (Header) إذا وجد
         const base64Data = base64String.replace(/^data:image\/\w+;base64,/, "");
         const buffer = Buffer.from(base64Data, 'base64');
+        
+        // تحسين جودة الصورة وتقليل حجمها (Compression) قبل الرفع
         const optimized = await sharp(buffer).jpeg({ quality: 75 }).toBuffer();
         return await uploadToSupabase(optimized, fileName, folder);
     } catch (error) {
@@ -20,13 +23,14 @@ const processBase64AndUpload = async (base64String, fileName, folder = 'voters')
 
 /**
  * 1. التحقق المبدئي (Auto-fill)
- * تُستخدم لسحب بيانات المواطن من السجل المدني قبل التسجيل الرسمي
+ * تُستخدم لسحب بيانات المواطن من السجل المدني بمجرد إدخال الرقم القومي والتواريخ
+ * تطابق الشاشات: Screenshot (474) و Screenshot (476)
  */
 exports.verifyBeforeRegister = async (req, res) => {
     try {
         const { national_id, birth_date, expiry_date } = req.body;
         
-        // الموديل هنا بيرجع البيانات بناءً على الـ SQL اللي ظبطناه
+        // البحث عن المواطن في جدول السجل المدني (civil_registry)
         const citizen = await Voter.verifyInRegistry(national_id, birth_date, expiry_date);
         
         if (!citizen) {
@@ -42,9 +46,9 @@ exports.verifyBeforeRegister = async (req, res) => {
             data: {
                 full_name: citizen.full_name,
                 address: citizen.address,
-                governorate: citizen.governorate, // متطابق مع SQL
-                administrative_unit: citizen.administrative_unit, // متطابق مع SQL
-                unit_id: citizen.unit_id // مهم جداً للربط لاحقاً
+                governorate: citizen.governorate_name, // الاسم النصي للمحافظة من الـ Join
+                administrative_unit: citizen.administrative_unit, // الاسم النصي للقسم/المركز
+                unit_id: citizen.unit_id // المعرف الرقمي لاستخدامه في الـ Register
             }
         });
     } catch (err) { 
@@ -55,35 +59,41 @@ exports.verifyBeforeRegister = async (req, res) => {
 
 /**
  * 2. تسجيل ناخب جديد (Register)
+ * تطابق الشاشة: Screenshot (475)
  */
 exports.registerVoter = async (req, res) => {
     try {
-        const { national_id, birth_date, expiry_date, email, password, party_card_url, unit_id } = req.body;
+        const { national_id, birth_date, expiry_date, email, password, party_card_url } = req.body;
         
-        // تأكيد الهوية للمرة الأخيرة
+        // تأكيد الهوية مرة أخيرة قبل الإنشاء لضمان الأمان
         const citizen = await Voter.verifyInRegistry(national_id, birth_date, expiry_date);
         if (!citizen) return res.status(401).json({ success: false, message: "الهوية غير مطابقة للسجل المدني" });
 
-        // رفع بطاقة الحزب إن وجدت
+        // معالجة ورفع صورة بطاقة الحزب (إن وجدت)
         let finalPartyCardUrl = null;
         if (party_card_url && party_card_url.startsWith('data:image')) {
-            finalPartyCardUrl = await processBase64AndUpload(party_card_url, `card_${national_id}_${Date.now()}.jpg`);
+            finalPartyCardUrl = await processBase64AndUpload(
+                party_card_url, 
+                `card_${national_id}_${Date.now()}.jpg`
+            );
         }
 
+        // تشفير كلمة المرور
         const hashedPassword = await bcrypt.hash(password, 10);
         
-        // إنشاء الناخب في جدول الـ voters
+        // إنشاء السجل في جدول الناخبين (voters)
         await Voter.create({ 
             national_id, 
             email, 
             password: hashedPassword, 
             party_card_url: finalPartyCardUrl,
-            unit_id: unit_id || citizen.unit_id // استخدام الـ unit_id القادم من السجل المدني
+            unit_id: citizen.unit_id // الربط التلقائي بالدائرة الانتخابية
         });
 
         res.status(201).json({ success: true, message: "تم التسجيل بنجاح، يمكنك الآن تسجيل الدخول" });
     } catch (err) {
         console.error("Register Error:", err);
+        // التعامل مع تكرار المفاتيح (رقم قومي أو بريد مسجل مسبقاً)
         if (err.code === '23505') return res.status(400).json({ success: false, message: "هذا الرقم القومي أو البريد مسجل بالفعل" });
         res.status(500).json({ success: false, message: "خطأ في عملية التسجيل" });
     }
@@ -91,25 +101,26 @@ exports.registerVoter = async (req, res) => {
 
 /**
  * 3. تسجيل الدخول (Login)
+ * يدعم الدخول التقليدي أو ببصمة الوجه
  */
 exports.login = async (req, res) => {
     const { email, password, national_id_from_face } = req.body;
     try {
         let user;
 
-        // الدخول ببصمة الوجه
+        // التحقق من نوع الدخول
         if (national_id_from_face) {
+            // دخول ببصمة الوجه (بيبعت الرقم القومي المستخرج من الـ AI)
             user = await Voter.findByIdentifier(national_id_from_face, true);
-        } 
-        // الدخول التقليدي
-        else {
+        } else {
+            // دخول تقليدي بالإيميل والباسورد
             user = await Voter.findByIdentifier(email, false);
             if (user && !(await bcrypt.compare(password, user.password))) user = null;
         }
 
         if (!user) return res.status(401).json({ success: false, message: "بيانات الدخول خاطئة" });
 
-        // إنشاء التوكن (JWT)
+        // توليد التوكن (JWT)
         const token = jwt.sign(
             { 
                 id: user.voter_id, 
@@ -139,12 +150,13 @@ exports.login = async (req, res) => {
 };
 
 /**
- * 4. جلب بيانات بطاقة الناخب
+ * 4. جلب بيانات بطاقة الناخب (Digital ID)
+ * تُستخدم لعرض "كارنيه" الناخب بعد تسجيل الدخول
  */
 exports.getVoterCard = async (req, res) => {
     try {
-        const userId = req.user.id; 
-        const user = await Voter.findByIdentifier(userId, true); // البحث باستخدام الـ ID الداخلي
+        const userId = req.user.id; // المعرف المستخرج من الميدل وير
+        const user = await Voter.findByIdentifier(userId, 'id'); 
 
         if (!user) {
             return res.status(404).json({ success: false, message: "الناخب غير موجود" });
@@ -154,7 +166,7 @@ exports.getVoterCard = async (req, res) => {
             success: true,
             data: {
                 full_name: user.full_name,
-                v_code: user.v_code, // تأكد إن العمود ده موجود في جدول الـ voters
+                v_code: user.v_code, // الكود الانتخابي الفريد
                 national_id: user.national_id,
                 governorate: user.governorate_name,
                 unit: user.administrative_unit

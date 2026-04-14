@@ -47,7 +47,7 @@ const authMiddleware = (req, res, next) => {
             national_id: decoded.national_id || null
         };
 
-        // 6. الانتقال للخطوة التالية (الـ Controller)
+        // 6. الانتقال للخطوة التالية (الـ Controller المطلوب)
         next();
 
     } catch (err) {
