@@ -1,18 +1,19 @@
 const express = require('express');
 const router = express.Router();
+// تأكد أن المسار لملف الـ controller صحيح تماماً
 const candidateController = require('../controllers/candidateController');
 
-// 1. تسجيل المرشح (Triple Check + Auto-fill Data Response)
-// ده اللي هيرجع الـ JSON "الدسم" اللي فيه المحافظة والعنوان والسن عشان الصفحة تتملي
+// 1. تسجيل المرشح
+// لو السيرفر بيضرب هنا، يبقى دالة registerCandidate مش موجودة في الـ candidateController
 router.post('/register', candidateController.registerCandidate);
 
-// 2. تسجيل دخول المرشح (بالبريد أو الرقم القومي)
+// 2. تسجيل دخول المرشح
 router.post('/loginCandidate', candidateController.loginCandidate);
 
-// 3. جلب قائمة المرشحين (للناخبين)
+// 3. جلب قائمة المرشحين
 router.get('/list', candidateController.listCandidates);
 
-// 4. جلب البروفايل الكامل (المدمج مع بيانات السجل المدني)
+// 4. جلب البروفايل الكامل
 router.get('/profile/:id', candidateController.getCandidateProfile);
 
 // 5. جلب الأصوات الحالية
