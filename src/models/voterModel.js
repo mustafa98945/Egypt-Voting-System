@@ -3,8 +3,7 @@ const pool = require('../config/db');
 class Voter {
     /**
      * 1. التحقق من السجل المدني (Auto-fill)
-     * تستخدم لجلب بيانات المواطن بالأسماء النصية للمحافظة والقسم
-     * لضمان ملء واجهة المستخدم (Frontend) ببيانات صحيحة
+     * التعديل: سحب الـ unit_id مباشرة من السجل المدني لضمان صحة الربط
      */
     static async verifyInRegistry(national_id, birth_date, expiry_date) {
         const queryText = `
@@ -12,12 +11,12 @@ class Voter {
                 cr.full_name, 
                 cr.address, 
                 cr.national_id,
+                cr.unit_id, -- سحب معرف الوحدة مباشرة من السجل المدني
                 g.governorate_name, 
-                au.administrative_unit, 
-                au.id as unit_id         
+                au.administrative_unit
             FROM civil_registry cr
             LEFT JOIN governorates g ON cr.governorate = g.governorate_name
-            LEFT JOIN administrative_units au ON cr.administrative_unit = au.administrative_unit
+            LEFT JOIN administrative_units au ON cr.unit_id = au.id 
             WHERE cr.national_id = $1 AND cr.birth_date = $2 AND cr.expiry_date = $3
         `;
         const result = await pool.query(queryText, [national_id, birth_date, expiry_date]);
@@ -26,10 +25,7 @@ class Voter {
 
     /**
      * 2. البحث عن ناخب (Login & Profile & Digital ID)
-     * تدعم البحث بـ:
-     * - الرقم القومي (type: 'face' أو true) -> لبصمة الوجه
-     * - المعرف الرقمي (type: 'id') -> لجلب بيانات البطاقة (Digital ID)
-     * - البريد الإلكتروني (الوضع الافتراضي) -> لتسجيل الدخول التقليدي
+     * التعديل: الربط باستخدام unit_id المخزن في جدول الناخبين
      */
     static async findByIdentifier(identifier, type) {
         let column;
@@ -51,7 +47,7 @@ class Voter {
             FROM voters v 
             JOIN civil_registry cr ON v.national_id = cr.national_id 
             LEFT JOIN governorates g ON cr.governorate = g.governorate_name
-            LEFT JOIN administrative_units au ON cr.administrative_unit = au.administrative_unit
+            LEFT JOIN administrative_units au ON v.unit_id = au.id
             WHERE ${column} = $1
         `;
 
@@ -60,7 +56,7 @@ class Voter {
     }
 
     /**
-     * 3. إنشاء حساب ناخب جديد في جدول الـ voters
+     * 3. إنشاء حساب ناخب جديد
      */
     static async create(data) {
         const { national_id, email, password, party_card_url, unit_id } = data;
@@ -75,7 +71,6 @@ class Voter {
 
     /**
      * 4. تحديث حالة التصويت
-     * تُستدعى هذه الدالة فور إتمام عملية التصويت بنجاح لمنع التكرار
      */
     static async markAsVoted(voter_id) {
         const result = await pool.query(
@@ -86,8 +81,7 @@ class Voter {
     }
 
     /**
-     * 5. التحقق السريع من وجود الحساب (Validation)
-     * مفيدة للتحقق قبل البدء في عمليات معقدة
+     * 5. التحقق السريع من وجود الحساب
      */
     static async exists(national_id, email) {
         const result = await pool.query(
