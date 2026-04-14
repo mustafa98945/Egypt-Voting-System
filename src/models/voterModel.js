@@ -36,28 +36,14 @@ class Voter {
     return rows[0];
 }
     // 3. البحث بالرقم القومي (لعملية الـ Login أو بصمة الوجه)
-    static async findByNationalId(nationalId) {
-        const query = `
-            SELECT v.*, cr.full_name 
-            FROM voters v
-            JOIN civil_registry cr ON v.national_id = cr.national_id
-            WHERE TRIM(v.national_id) = TRIM($1)
-        `;
-        const { rows } = await pool.query(query, [nationalId]);
-        return rows[0];
-    }
-
-    // 4. البحث بالبريد الإلكتروني (لعملية الـ Login التقليدي)
-    static async findByEmail(email) {
-        const query = `
-            SELECT v.*, cr.full_name 
-            FROM voters v
-            JOIN civil_registry cr ON v.national_id = cr.national_id
-            WHERE v.email = $1
-        `;
-        const { rows } = await pool.query(query, [email]);
-        return rows[0];
-    }
+   static async findByNationalId(id) {
+    const { rows } = await pool.query('SELECT * FROM voters WHERE national_id = $1', [id]);
+    return rows[0];
+}
+static async findByEmail(email) {
+    const { rows } = await pool.query('SELECT * FROM voters WHERE email = $1', [email]);
+    return rows[0];
+}
 
     // 5. جلب بيانات الكارت الرقمي (Digital ID)
     static async getFullProfile(voterId) {

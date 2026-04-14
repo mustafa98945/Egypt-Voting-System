@@ -110,40 +110,42 @@ exports.login = async (req, res) => {
         const { national_id, email, password, isFaceAuthenticated } = req.body;
         let voter;
 
-        if (national_id) {
-            voter = await Voter.findByIdentifier(national_id, 'face');
-            if (!voter) return res.status(404).json({ success: false, message: "الرقم القومي غير مسجل كبيانات ناخب" });
-
-            if (!isFaceAuthenticated && password) {
-                const isMatch = await bcrypt.compare(password, voter.password);
-                if (!isMatch) return res.status(401).json({ success: false, message: "كلمة المرور غير صحيحة" });
+        // 1. المسار الأول: الدخول عن طريق بصمة الوجه (National ID فقط)
+        if (isFaceAuthenticated && national_id) {
+            voter = await Voter.findByNationalId(national_id);
+            if (!voter) {
+                return res.status(404).json({ success: false, message: "هذا الحساب غير مسجل" });
             }
+            // بما إن الوجه تم التحقق منه في الموبايل/الفورنت إند، بنعمل Login فوراً
         } 
-        else if (email) {
-            voter = await Voter.findByIdentifier(email, 'email');
-            if (!voter) return res.status(404).json({ success: false, message: "البريد الإلكتروني غير مسجل" });
+        
+        // 2. المسار الثاني: الدخول التقليدي (Email + Password)
+        else if (email && password) {
+            voter = await Voter.findByEmail(email);
+            if (!voter) {
+                return res.status(404).json({ success: false, message: "البريد الإلكتروني غير مسجل" });
+            }
 
             const isMatch = await bcrypt.compare(password, voter.password);
-            if (!isMatch) return res.status(401).json({ success: false, message: "بيانات الدخول غير صحيحة" });
+            if (!isMatch) {
+                return res.status(401).json({ success: false, message: "كلمة المرور غير صحيحة" });
+            }
         } 
+        
         else {
-            return res.status(400).json({ success: false, message: "يرجى إدخال الرقم القومي أو البريد" });
+            return res.status(400).json({ success: false, message: "يرجى توفير بيانات الدخول الصحيحة" });
         }
 
-        // إنشاء التوكن بنفس الـ Structure (ID, NationalID, Role)
+        // 3. إنشاء التوكن (JWT) لكل الحالات الناجحة
         const token = jwt.sign(
-            { 
-                id: voter.voter_id, 
-                national_id: voter.national_id,
-                role: 'voter' 
-            }, 
-            process.env.JWT_SECRET, 
+            { id: voter.voter_id, national_id: voter.national_id, role: 'voter' },
+            process.env.JWT_SECRET,
             { expiresIn: '24h' }
         );
 
-        res.status(200).json({ 
-            success: true, 
-            token, 
+        res.status(200).json({
+            success: true,
+            token,
             user_data: {
                 id: voter.voter_id,
                 national_id: voter.national_id,
@@ -153,11 +155,10 @@ exports.login = async (req, res) => {
         });
 
     } catch (err) {
-        console.error("Voter Login Error:", err);
+        console.error("Login Error:", err);
         res.status(500).json({ success: false, message: "خطأ في السيرفر" });
     }
 };
-
 // --- 4. جلب بيانات الكارت الرقمي (للموبايل) ---
 exports.getVoterCard = async (req, res) => {
     try {
