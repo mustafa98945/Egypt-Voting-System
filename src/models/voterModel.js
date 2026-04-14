@@ -8,13 +8,13 @@ class Voter {
             cr.full_name, 
             cr.address, 
             cr.national_id,
-            cr.administrative_unit as unit_name, -- الاسم النصي من السجل المدني
-            au.id as unit_id                      -- الـ ID المقابل له من جدول الوحدات
+            cr.administrative_unit, -- هات الاسم مباشرة من السجل المدني
+            au.id as unit_id         -- هات الـ ID من جدول الوحدات
         FROM civil_registry cr
         LEFT JOIN administrative_units au ON TRIM(cr.administrative_unit) = TRIM(au.administrative_unit)
         WHERE TRIM(cr.national_id) = TRIM($1) 
-            AND cr.birth_date = $2 
-            AND cr.expiry_date = $3
+          AND cr.birth_date = $2 
+          AND cr.expiry_date = $3
     `;
     const { rows } = await pool.query(query, [nationalId, birthDate, expiryDate]);
     return rows[0];
