@@ -20,19 +20,21 @@ class Voter {
 }
 
     // 2. إنشاء ناخب جديد (نفس تكنيك الـ Candidate)
-    static async create(voterData) {
-    const { national_id, full_name, address, administrative_unit, email, password, face_token, party_card_url } = voterData;
+   static async create(voterData) {
+    // إحنا هنا بناخد بس الخانات اللي موجودة فعلياً في جدول voters بتاعك (حسب صورة 27)
+    const { national_id, email, password, face_token, party_card_url } = voterData;
     
     const query = `
-        INSERT INTO voters (national_id, full_name, address, administrative_unit, email, password, face_token, party_card_url)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        INSERT INTO voters (national_id, email, password, face_signature, party_card_url)
+        VALUES ($1, $2, $3, $4, $5)
         RETURNING *
     `;
-    const values = [national_id, full_name, address, administrative_unit, email, password, face_token, party_card_url];
+    
+    // لاحظ إننا بعتنا face_token في خانة face_signature اللي موجودة في جدولك
+    const values = [national_id, email, password, face_token, party_card_url];
     const { rows } = await pool.query(query, values);
     return rows[0];
 }
-
     // 3. البحث بالرقم القومي (لعملية الـ Login أو بصمة الوجه)
     static async findByNationalId(nationalId) {
         const query = `
