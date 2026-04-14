@@ -1,33 +1,69 @@
 const Vote = require('../models/voteModel');
 
-// تأكد إن اسم الدالة castVote ومسبوق بكلمة exports
+/**
+ * 1. تنفيذ عملية التصويت (Cast Vote)
+ * تعتمد على البيانات المستخرجة من التوكن (req.user)
+ */
 exports.castVote = async (req, res) => {
     try {
-        const { id, role } = req.user;
+        // البيانات المستخرجة من الميدل وير بعد فك التوكن
+        const { id, role } = req.user; 
         const { candidate_id } = req.body;
+
+        if (!candidate_id) {
+            return res.status(400).json({ success: false, message: "يرجى اختيار مرشح للتصويت له" });
+        }
+
+        // تحديد اسم الجدول والعمود ديناميكياً بناءً على نوع المستخدم
+        const tableName = role === 'candidate' ? 'candidates' : 'voters';
+        const idColumn = role === 'candidate' ? 'candidate_id' : 'id';
+
+        // أ- التحقق من حالة التصويت السابقة
+        const status = await Vote.checkIfVoted(tableName, idColumn, id);
+        
+        if (status && status.has_voted) {
+            return res.status(400).json({ 
+                success: false, 
+                message: "عذراً، لقد قمت بالتصويت بالفعل سابقاً" 
+            });
+        }
+
+        // ب- تنفيذ عملية التصويت (Transaction)
+        await Vote.executeVote(role, id, candidate_id, tableName, idColumn);
+
+        res.status(200).json({ 
+            success: true, 
+            message: "تم تسجيل صوتك بنجاح! شكراً لمشاركتك في العملية الانتخابية." 
+        });
+
+    } catch (err) {
+        console.error("Cast Vote Error:", err.message);
+        res.status(500).json({ 
+            success: false, 
+            message: "حدث خطأ داخلي أثناء تسجيل الصوت، يرجى المحاولة لاحقاً" 
+        });
+    }
+};
+
+/**
+ * 2. التحقق من حالة التصويت (Check Status)
+ * تستخدمها الواجهة الأمامية (Front-end) لمعرفة هل تظهر زر التصويت أم لا
+ */
+exports.checkUserVotingStatus = async (req, res) => {
+    try {
+        const { id, role } = req.user;
 
         const tableName = role === 'candidate' ? 'candidates' : 'voters';
         const idColumn = role === 'candidate' ? 'candidate_id' : 'id';
 
-        // التحقق من التصويت السابق
         const status = await Vote.checkIfVoted(tableName, idColumn, id);
-        if (status && status.has_voted) {
-            return res.status(400).json({ success: false, message: "لقد قمت بالتصويت بالفعل" });
-        }
-
-        await Vote.executeVote(role, id, candidate_id, tableName, idColumn);
-        res.json({ success: true, message: "تم التصويت بنجاح" });
+        
+        res.status(200).json({ 
+            success: true, 
+            hasVoted: status ? status.has_voted : false 
+        });
     } catch (err) {
-        console.error(err);
-        res.status(500).json({ success: false, message: "خطأ داخلي" });
+        console.error("Check Status Error:", err.message);
+        res.status(500).json({ success: false, message: "خطأ في جلب حالة التصويت" });
     }
-};
-
-// لازم تضيف دي كمان عشان الـ Router بينادي عليها
-exports.checkUserVotingStatus = async (req, res) => {
-    const { id, role } = req.user;
-    const tableName = role === 'candidate' ? 'candidates' : 'voters';
-    const idColumn = role === 'candidate' ? 'candidate_id' : 'id';
-    const status = await Vote.checkIfVoted(tableName, idColumn, id);
-    res.json({ success: true, hasVoted: status ? status.has_voted : false });
 };

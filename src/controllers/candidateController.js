@@ -29,7 +29,7 @@ const processBase64AndUpload = async (base64String, fileName, folder = 'candidat
     }
 };
 
-// --- 1. تسجيل مرشح جديد (مطابق للـ Schema الجديدة) ---
+// --- 1. تسجيل مرشح جديد ---
 exports.registerCandidate = async (req, res) => {
     try {
         const data = req.body;
@@ -48,7 +48,7 @@ exports.registerCandidate = async (req, res) => {
             });
         }
 
-        // الخطوة 2: معالجة الـ 5 ملفات الانتخابية فقط (حسب الـ Schema)
+        // الخطوة 2: معالجة الملفات
         const candidateElectionFiles = [
             'election_symbol_url', 
             'financial_disclosure_url', 
@@ -70,7 +70,6 @@ exports.registerCandidate = async (req, res) => {
 
         const hashedPassword = await bcrypt.hash(data.password, 10);
         
-        // الخطوة 3: تجميع البيانات النهائية (الأعمدة الموجودة فعلياً في الجدول فقط)
         const fullCandidateData = {
             national_id: data.national_id,
             birth_date: data.birth_date,
@@ -86,18 +85,12 @@ exports.registerCandidate = async (req, res) => {
 
         const newCandidate = await Candidate.create(fullCandidateData);
 
-        // إرجاع البيانات المتاحة فقط
         res.status(201).json({ 
             success: true, 
             message: "تم التسجيل بنجاح",
             data: {
                 candidate_id: newCandidate.candidate_id,
-                email: newCandidate.email,
-                national_id: newCandidate.national_id,
-                occupation: newCandidate.occupation,
-                candidate_type: newCandidate.candidate_type,
-                personal_photos_url: newCandidate.personal_photos_url,
-                election_symbol_url: newCandidate.election_symbol_url
+                national_id: newCandidate.national_id
             }
         });
 
@@ -108,34 +101,24 @@ exports.registerCandidate = async (req, res) => {
     }
 };
 
-// --- 2. تسجيل دخول المرشح ---
+// --- 2. تسجيل دخول المرشح (التعديل المهم هنا) ---
 exports.loginCandidate = async (req, res) => {
     try {
         const { national_id, email, password, isFaceAuthenticated } = req.body;
         let candidate;
 
-        // 1. مسار الرقم القومي (بصمة الوجه أو دخول سريع)
         if (national_id) {
             candidate = await Candidate.findByNationalId(national_id);
-            if (!candidate) {
-                return res.status(404).json({ success: false, message: "الرقم القومي غير مسجل" });
-            }
+            if (!candidate) return res.status(404).json({ success: false, message: "الرقم القومي غير مسجل" });
 
-            // لو مش عامل Face Auth، ممكن تخليه يدخل بالـ ID بس (لو ده قصدك) 
-            // أو تجبره على الباسورد.. التعديل ده هيخليه "اختياري":
             if (!isFaceAuthenticated && password) {
                 const isMatch = await bcrypt.compare(password, candidate.password);
                 if (!isMatch) return res.status(401).json({ success: false, message: "كلمة المرور غير صحيحة" });
             }
-            // لو مبعتش باسورد ولا Flag، والسستم مسموح فيه بالدخول بالـ ID (زي التعرف على الوجه)
         } 
-        
-        // 2. مسار الإيميل (إلزامي باسورد)
         else if (email) {
             candidate = await Candidate.findByEmail(email);
             if (!candidate) return res.status(404).json({ success: false, message: "البريد الإلكتروني غير مسجل" });
-
-            if (!password) return res.status(400).json({ success: false, message: "الباسورد مطلوبة مع الإيميل" });
 
             const isMatch = await bcrypt.compare(password, candidate.password);
             if (!isMatch) return res.status(401).json({ success: false, message: "بيانات الدخول غير صحيحة" });
@@ -144,15 +127,35 @@ exports.loginCandidate = async (req, res) => {
             return res.status(400).json({ success: false, message: "يرجى إدخال الرقم القومي أو البريد" });
         }
 
-        const token = jwt.sign({ id: candidate.national_id }, process.env.JWT_SECRET, { expiresIn: '24h' });
+        // ✅ التعديل الجذري: إضافة الـ Role والـ ID الصحيح للتوكن
+        const token = jwt.sign(
+            { 
+                id: candidate.candidate_id, // استخدام الـ Primary Key
+                national_id: candidate.national_id,
+                role: 'candidate' // ضروري جداً لعملية التصويت
+            }, 
+            process.env.JWT_SECRET, 
+            { expiresIn: '24h' }
+        );
 
-        res.status(200).json({ success: true, token, user_data: candidate });
+        res.status(200).json({ 
+            success: true, 
+            token, 
+            user_data: {
+                id: candidate.candidate_id,
+                national_id: candidate.national_id,
+                role: 'candidate',
+                full_name: candidate.full_name // تأكد إن الـ Model بيرجعه
+            }
+        });
 
     } catch (err) {
         console.error("Login Error:", err);
         res.status(500).json({ success: false, message: "خطأ في السيرفر" });
     }
-};// --- 3. جلب البروفايل ---
+};
+
+// --- 3. جلب البروفايل ---
 exports.getCandidateProfile = async (req, res) => {
     try {
         const profile = await Candidate.getFullProfile(req.params.id);
@@ -163,7 +166,7 @@ exports.getCandidateProfile = async (req, res) => {
     }
 };
 
-// --- 4. قائمة المرشحين (عرض الاسم من جدول السجل المدني عبر JOIN) ---
+// --- 4. قائمة المرشحين ---
 exports.listCandidates = async (req, res) => {
     try {
         const query = `
@@ -173,7 +176,8 @@ exports.listCandidates = async (req, res) => {
                 c.occupation, 
                 c.candidate_type,
                 c.election_symbol_url,
-                c.personal_photos_url
+                c.personal_photos_url,
+                c.candidate_id
             FROM candidates c
             LEFT JOIN civil_registry cr ON c.national_id = cr.national_id
             ORDER BY c.created_at DESC

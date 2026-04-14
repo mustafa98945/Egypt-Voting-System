@@ -20,23 +20,23 @@ const authMiddleware = (req, res, next) => {
         const token = authHeader.split(' ')[1];
 
         // 2. التحقق من صلاحية التوكن باستخدام المفتاح السري
-        // jwt.verify بيفك التوكن، ولو فيه مشكلة هيدخلنا في الـ catch فوراً
+        // jwt.verify بيفك التوكن، ولو فيه مشكلة (منتهي أو مزور) هيدخلنا في الـ catch فوراً
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
         /**
          * 3. توحيد بيانات المستخدم (Normalization)
          * بنجمع الـ ID سواء كان اسمه (id) أو (voter_id) أو (candidate_id)
-         * عشان الـ Controller يتعامل مع متغير واحد اسمه id
+         * وبنقرأ الـ role عشان الـ Controller يعرف يختار الجدول الصح
          */
         const userId = decoded.id || decoded.voter_id || decoded.candidate_id;
         const userRole = decoded.role;
 
         // 4. التأكد من أن البيانات الأساسية موجودة فعلياً داخل التوكن بعد الفك
         if (!userId || !userRole) {
-            console.error("Auth Failure: Missing userId or userRole in Token", decoded);
+            console.error("⚠️ Auth Failure: Missing userId or userRole in Token", decoded);
             return res.status(403).json({
                 success: false,
-                message: "التوكن لا يحتوي على بيانات الهوية المطلوبة"
+                message: "التوكن لا يحتوي على بيانات الهوية المطلوبة (الرول أو المعرف مفقود)"
             });
         }
 
@@ -51,7 +51,7 @@ const authMiddleware = (req, res, next) => {
         next();
 
     } catch (err) {
-        console.error("Auth Middleware Error:", err.message);
+        console.error("❌ Auth Middleware Error:", err.message);
         
         // حالة التوكن المنتهي (Expired)
         if (err.name === 'TokenExpiredError') {
