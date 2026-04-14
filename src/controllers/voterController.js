@@ -1,179 +1,181 @@
-const bcrypt = require('bcryptjs');
-const sharp = require('sharp');
+const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
-const Voter = require('../models/voterModel');
+const sharp = require('sharp');
 const { uploadToSupabase } = require('../utils/supabaseHelper');
+const Voter = require('../models/voterModel');
+const pool = require('../config/db');
 
-// --- دالة معالجة الصور (بطاقة الحزب أو بصمة الوجه) ---
+// --- الدالة المساعدة لمعالجة الـ Base64 (نفس اللي في المرشح) ---
 const processBase64AndUpload = async (base64String, fileName, folder = 'voters') => {
     try {
-        if (!base64String) return null;
-        // تنظيف الـ base64 string من الرأس (Header) إذا وجد
-        const base64Data = base64String.replace(/^data:image\/\w+;base64,/, "");
+        if (!base64String || typeof base64String !== 'string') return null;
+        const base64Data = base64String.split(';base64,').pop();
         const buffer = Buffer.from(base64Data, 'base64');
-        
-        // تحسين جودة الصورة وتقليل حجمها (Compression) قبل الرفع
-        const optimized = await sharp(buffer).jpeg({ quality: 75 }).toBuffer();
-        return await uploadToSupabase(optimized, fileName, folder);
+        if (buffer.length === 0) return null;
+
+        try {
+            const optimized = await sharp(buffer)
+                .rotate()
+                .resize({ width: 1000, withoutEnlargement: true })
+                .jpeg({ quality: 70, chromaSubsampling: '4:2:0' }) 
+                .toBuffer();
+            return await uploadToSupabase(optimized, fileName, folder);
+        } catch (sharpError) {
+            return await uploadToSupabase(buffer, fileName, folder);
+        }
     } catch (error) {
-        console.error(`خطأ في معالجة الصورة:`, error);
-        throw new Error("فشل رفع الصورة");
+        console.error(`Error processing ${fileName}:`, error.message);
+        return null;
     }
 };
 
-/**
- * 1. التحقق المبدئي (Auto-fill)
- * تُستخدم لسحب بيانات المواطن من السجل المدني بمجرد إدخال الرقم القومي والتواريخ
- * تطابق الشاشات: Screenshot (474) و Screenshot (476)
- */
+// --- 1. التحقق قبل التسجيل (Auto-fill) ---
 exports.verifyBeforeRegister = async (req, res) => {
     try {
         const { national_id, birth_date, expiry_date } = req.body;
-        
-        // البحث عن المواطن في جدول السجل المدني (civil_registry)
+
         const citizen = await Voter.verifyInRegistry(national_id, birth_date, expiry_date);
-        
+
         if (!citizen) {
             return res.status(401).json({ 
                 success: false, 
-                message: "البيانات غير مطابقة للسجل المدني أو البطاقة منتهية" 
+                message: "بيانات الهوية غير مطابقة للسجل المدني أو البطاقة منتهية" 
             });
         }
 
-        // إرسال البيانات للـ Frontend لملء الحقول تلقائياً
         res.json({ 
             success: true, 
             data: {
                 full_name: citizen.full_name,
                 address: citizen.address,
-                governorate: citizen.governorate_name, // الاسم النصي للمحافظة من الـ Join
-                administrative_unit: citizen.administrative_unit, // الاسم النصي للقسم/المركز
-                unit_id: citizen.unit_id // المعرف الرقمي لاستخدامه في الـ Register
+                governorate: citizen.governorate_name,
+                administrative_unit: citizen.administrative_unit,
+                unit_id: citizen.unit_id
             }
         });
-    } catch (err) { 
-        console.error("Verify Error:", err);
-        res.status(500).json({ success: false, message: "خطأ في السيرفر أثناء التحقق" }); 
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
     }
 };
 
-/**
- * 2. تسجيل ناخب جديد (Register)
- * تطابق الشاشة: Screenshot (475)
- */
+// --- 2. تسجيل ناخب جديد (نفس طريقة المرشح) ---
 exports.registerVoter = async (req, res) => {
     try {
-        const { national_id, birth_date, expiry_date, email, password, party_card_url } = req.body;
-        
-        // تأكيد الهوية مرة أخيرة قبل الإنشاء لضمان الأمان
-        const citizen = await Voter.verifyInRegistry(national_id, birth_date, expiry_date);
-        if (!citizen) return res.status(401).json({ success: false, message: "الهوية غير مطابقة للسجل المدني" });
+        const data = req.body;
 
-        // معالجة ورفع صورة بطاقة الحزب (إن وجدت)
-        let finalPartyCardUrl = null;
-        if (party_card_url && party_card_url.startsWith('data:image')) {
-            finalPartyCardUrl = await processBase64AndUpload(
-                party_card_url, 
-                `card_${national_id}_${Date.now()}.jpg`
-            );
+        // الخطوة 1: التأكد من السجل المدني لجلب الـ unit_id
+        const citizen = await Voter.verifyInRegistry(data.national_id, data.birth_date, data.expiry_date);
+        if (!citizen) {
+            return res.status(401).json({ success: false, message: "تعذر التحقق من البيانات المسجلة" });
         }
 
-        // تشفير كلمة المرور
-        const hashedPassword = await bcrypt.hash(password, 10);
-        
-        // إنشاء السجل في جدول الناخبين (voters)
-        await Voter.create({ 
-            national_id, 
-            email, 
-            password: hashedPassword, 
-            party_card_url: finalPartyCardUrl,
-            unit_id: citizen.unit_id // الربط التلقائي بالدائرة الانتخابية
+        // الخطوة 2: معالجة صورة بطاقة الحزب (Base64)
+        let partyCardUrl = null;
+        if (data.party_card_url) {
+            const fileName = `party_card_${data.national_id}_${Date.now()}.jpg`;
+            partyCardUrl = await processBase64AndUpload(data.party_card_url, fileName);
+        }
+
+        // الخطوة 3: تشفير الباسورد
+        const hashedPassword = await bcrypt.hash(data.password, 10);
+
+        // الخطوة 4: الحفظ في الداتابيز
+        const newVoter = await Voter.create({
+            national_id: data.national_id,
+            email: data.email,
+            password: hashedPassword,
+            party_card_url: partyCardUrl,
+            unit_id: citizen.unit_id // تم الجلب من السجل المدني مباشرة
         });
 
-        res.status(201).json({ success: true, message: "تم التسجيل بنجاح، يمكنك الآن تسجيل الدخول" });
+        res.status(201).json({
+            success: true,
+            message: "تم إنشاء حساب الناخب بنجاح",
+            data: {
+                voter_id: newVoter.voter_id,
+                email: newVoter.email
+            }
+        });
+
     } catch (err) {
-        console.error("Register Error:", err);
-        // التعامل مع تكرار المفاتيح (رقم قومي أو بريد مسجل مسبقاً)
-        if (err.code === '23505') return res.status(400).json({ success: false, message: "هذا الرقم القومي أو البريد مسجل بالفعل" });
-        res.status(500).json({ success: false, message: "خطأ في عملية التسجيل" });
+        console.error("Voter Register Error:", err);
+        if (err.code === '23505') return res.status(400).json({ success: false, message: "الرقم القومي أو البريد مسجل مسبقاً" });
+        res.status(500).json({ success: false, message: `خطأ فني: ${err.message}` });
     }
 };
 
-/**
- * 3. تسجيل الدخول (Login)
- * يدعم الدخول التقليدي أو ببصمة الوجه
- */
+// --- 3. تسجيل دخول الناخب (بنفس الـ Logic بتاع المرشح) ---
 exports.login = async (req, res) => {
-    const { email, password, national_id_from_face } = req.body;
     try {
-        let user;
+        const { national_id, email, password, isFaceAuthenticated } = req.body;
+        let voter;
 
-        // التحقق من نوع الدخول
-        if (national_id_from_face) {
-            // دخول ببصمة الوجه (بيبعت الرقم القومي المستخرج من الـ AI)
-            user = await Voter.findByIdentifier(national_id_from_face, true);
-        } else {
-            // دخول تقليدي بالإيميل والباسورد
-            user = await Voter.findByIdentifier(email, false);
-            if (user && !(await bcrypt.compare(password, user.password))) user = null;
+        if (national_id) {
+            voter = await Voter.findByIdentifier(national_id, 'face');
+            if (!voter) return res.status(404).json({ success: false, message: "الرقم القومي غير مسجل كبيانات ناخب" });
+
+            if (!isFaceAuthenticated && password) {
+                const isMatch = await bcrypt.compare(password, voter.password);
+                if (!isMatch) return res.status(401).json({ success: false, message: "كلمة المرور غير صحيحة" });
+            }
+        } 
+        else if (email) {
+            voter = await Voter.findByIdentifier(email, 'email');
+            if (!voter) return res.status(404).json({ success: false, message: "البريد الإلكتروني غير مسجل" });
+
+            const isMatch = await bcrypt.compare(password, voter.password);
+            if (!isMatch) return res.status(401).json({ success: false, message: "بيانات الدخول غير صحيحة" });
+        } 
+        else {
+            return res.status(400).json({ success: false, message: "يرجى إدخال الرقم القومي أو البريد" });
         }
 
-        if (!user) return res.status(401).json({ success: false, message: "بيانات الدخول خاطئة" });
-
-        // توليد التوكن (JWT)
+        // إنشاء التوكن بنفس الـ Structure (ID, NationalID, Role)
         const token = jwt.sign(
             { 
-                id: user.voter_id, 
-                role: 'voter', 
-                national_id: user.national_id 
-            },
-            process.env.JWT_SECRET,
+                id: voter.voter_id, 
+                national_id: voter.national_id,
+                role: 'voter' 
+            }, 
+            process.env.JWT_SECRET, 
             { expiresIn: '24h' }
         );
 
         res.status(200).json({ 
             success: true, 
             token, 
-            user_data: { 
-                id: user.voter_id, 
-                full_name: user.full_name, 
-                national_id: user.national_id, 
-                governorate: user.governorate_name, 
-                unit: user.administrative_unit, 
-                has_voted: user.has_voted 
-            } 
+            user_data: {
+                id: voter.voter_id,
+                national_id: voter.national_id,
+                full_name: voter.full_name,
+                role: 'voter'
+            }
         });
-    } catch (err) { 
-        console.error("Login Error:", err);
-        res.status(500).json({ success: false, message: "حدث خطأ أثناء تسجيل الدخول" }); 
+
+    } catch (err) {
+        console.error("Voter Login Error:", err);
+        res.status(500).json({ success: false, message: "خطأ في السيرفر" });
     }
 };
 
-/**
- * 4. جلب بيانات بطاقة الناخب (Digital ID)
- * تُستخدم لعرض "كارنيه" الناخب بعد تسجيل الدخول
- */
+// --- 4. جلب بيانات الكارت الرقمي (للموبايل) ---
 exports.getVoterCard = async (req, res) => {
     try {
-        const userId = req.user.id; // المعرف المستخرج من الميدل وير
-        const user = await Voter.findByIdentifier(userId, 'id'); 
+        const voter = await Voter.findByIdentifier(req.user.id, 'id');
+        if (!voter) return res.status(404).json({ success: false, message: "الناخب غير موجود" });
 
-        if (!user) {
-            return res.status(404).json({ success: false, message: "الناخب غير موجود" });
-        }
-
-        res.status(200).json({
+        res.json({
             success: true,
             data: {
-                full_name: user.full_name,
-                v_code: user.v_code, // الكود الانتخابي الفريد
-                national_id: user.national_id,
-                governorate: user.governorate_name,
-                unit: user.administrative_unit
+                full_name: voter.full_name,
+                national_id: voter.national_id,
+                v_code: voter.v_code,
+                governorate: voter.governorate_name,
+                administrative_unit: voter.administrative_unit,
+                has_voted: voter.has_voted
             }
         });
     } catch (err) {
-        console.error("Error in getVoterCard:", err);
-        res.status(500).json({ success: false, message: "خطأ في جلب بيانات البطاقة" });
+        res.status(500).json({ success: false, message: "خطأ في جلب بيانات الكارت" });
     }
 };

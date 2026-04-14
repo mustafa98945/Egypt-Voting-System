@@ -2,11 +2,11 @@ const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const sharp = require('sharp');
 const { uploadToSupabase } = require('../utils/supabaseHelper');
-const Candidate = require('../models/candidateModel');
+const Voter = require('../models/voterModel');
 const pool = require('../config/db');
 
-// --- دالة مساعدة لمعالجة الـ Base64 ورفعها ---
-const processBase64AndUpload = async (base64String, fileName, folder = 'candidates') => {
+// --- الدالة المساعدة لمعالجة الـ Base64 (نفس اللي في المرشح) ---
+const processBase64AndUpload = async (base64String, fileName, folder = 'voters') => {
     try {
         if (!base64String || typeof base64String !== 'string') return null;
         const base64Data = base64String.split(';base64,').pop();
@@ -29,18 +29,13 @@ const processBase64AndUpload = async (base64String, fileName, folder = 'candidat
     }
 };
 
-// --- 1. تسجيل مرشح جديد ---
-exports.registerCandidate = async (req, res) => {
+// --- 1. التحقق قبل التسجيل (Auto-fill) ---
+exports.verifyBeforeRegister = async (req, res) => {
     try {
-        const data = req.body;
+        const { national_id, birth_date, expiry_date } = req.body;
 
-        // الخطوة 1: التحقق من السجل المدني
-        const citizen = await Candidate.verifyRegistry(
-            data.national_id, 
-            data.birth_date, 
-            data.expiry_date
-        );
-        
+        const citizen = await Voter.verifyInRegistry(national_id, birth_date, expiry_date);
+
         if (!citizen) {
             return res.status(401).json({ 
                 success: false, 
@@ -48,91 +43,99 @@ exports.registerCandidate = async (req, res) => {
             });
         }
 
-        // الخطوة 2: معالجة الملفات
-        const candidateElectionFiles = [
-            'election_symbol_url', 
-            'financial_disclosure_url', 
-            'personal_photos_url', 
-            'fitness_health_url', 
-            'deposit_receipt_url'
-        ];
-        
-        let uploadedUrls = {};
-        for (const field of candidateElectionFiles) {
-            if (data[field]) {
-                const fileName = `${field}_${data.national_id}_${Date.now()}.jpg`;
-                const publicUrl = await processBase64AndUpload(data[field], fileName);
-                if (publicUrl) {
-                    uploadedUrls[field] = publicUrl;
-                }
+        res.json({ 
+            success: true, 
+            data: {
+                full_name: citizen.full_name,
+                address: citizen.address,
+                governorate: citizen.governorate_name,
+                administrative_unit: citizen.administrative_unit,
+                unit_id: citizen.unit_id
             }
+        });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+};
+
+// --- 2. تسجيل ناخب جديد (نفس طريقة المرشح) ---
+exports.registerVoter = async (req, res) => {
+    try {
+        const data = req.body;
+
+        // الخطوة 1: التأكد من السجل المدني لجلب الـ unit_id
+        const citizen = await Voter.verifyInRegistry(data.national_id, data.birth_date, data.expiry_date);
+        if (!citizen) {
+            return res.status(401).json({ success: false, message: "تعذر التحقق من البيانات المسجلة" });
         }
 
+        // الخطوة 2: معالجة صورة بطاقة الحزب (Base64)
+        let partyCardUrl = null;
+        if (data.party_card_url) {
+            const fileName = `party_card_${data.national_id}_${Date.now()}.jpg`;
+            partyCardUrl = await processBase64AndUpload(data.party_card_url, fileName);
+        }
+
+        // الخطوة 3: تشفير الباسورد
         const hashedPassword = await bcrypt.hash(data.password, 10);
-        
-        const fullCandidateData = {
+
+        // الخطوة 4: الحفظ في الداتابيز
+        const newVoter = await Voter.create({
             national_id: data.national_id,
-            birth_date: data.birth_date,
-            expiry_date: data.expiry_date,
             email: data.email,
             password: hashedPassword,
-            phone_number: data.phone_number,
-            occupation: data.occupation,
-            candidate_type: data.candidate_type,
-            short_bio: data.short_bio,
-            ...uploadedUrls
-        };
+            party_card_url: partyCardUrl,
+            unit_id: citizen.unit_id // تم الجلب من السجل المدني مباشرة
+        });
 
-        const newCandidate = await Candidate.create(fullCandidateData);
-
-        res.status(201).json({ 
-            success: true, 
-            message: "تم التسجيل بنجاح",
+        res.status(201).json({
+            success: true,
+            message: "تم إنشاء حساب الناخب بنجاح",
             data: {
-                candidate_id: newCandidate.candidate_id,
-                national_id: newCandidate.national_id
+                voter_id: newVoter.voter_id,
+                email: newVoter.email
             }
         });
 
     } catch (err) {
-        console.error("Register Error:", err);
+        console.error("Voter Register Error:", err);
         if (err.code === '23505') return res.status(400).json({ success: false, message: "الرقم القومي أو البريد مسجل مسبقاً" });
         res.status(500).json({ success: false, message: `خطأ فني: ${err.message}` });
     }
 };
 
-// --- 2. تسجيل دخول المرشح (التعديل المهم هنا) ---
-exports.loginCandidate = async (req, res) => {
+// --- 3. تسجيل دخول الناخب (بنفس الـ Logic بتاع المرشح) ---
+exports.login = async (req, res) => {
     try {
         const { national_id, email, password, isFaceAuthenticated } = req.body;
-        let candidate;
+        let voter;
 
         if (national_id) {
-            candidate = await Candidate.findByNationalId(national_id);
-            if (!candidate) return res.status(404).json({ success: false, message: "الرقم القومي غير مسجل" });
+            voter = await Voter.findByIdentifier(national_id, 'face');
+            if (!voter) return res.status(404).json({ success: false, message: "الرقم القومي غير مسجل كبيانات ناخب" });
 
             if (!isFaceAuthenticated && password) {
-                const isMatch = await bcrypt.compare(password, candidate.password);
+                const isMatch = await bcrypt.compare(password, voter.password);
                 if (!isMatch) return res.status(401).json({ success: false, message: "كلمة المرور غير صحيحة" });
             }
         } 
         else if (email) {
-            candidate = await Candidate.findByEmail(email);
-            if (!candidate) return res.status(404).json({ success: false, message: "البريد الإلكتروني غير مسجل" });
+            voter = await Voter.findByIdentifier(email, 'email');
+            if (!voter) return res.status(404).json({ success: false, message: "البريد الإلكتروني غير مسجل" });
 
-            const isMatch = await bcrypt.compare(password, candidate.password);
+            const isMatch = await bcrypt.compare(password, voter.password);
             if (!isMatch) return res.status(401).json({ success: false, message: "بيانات الدخول غير صحيحة" });
         } 
         else {
             return res.status(400).json({ success: false, message: "يرجى إدخال الرقم القومي أو البريد" });
         }
 
-        // ✅ التعديل الجذري: إضافة الـ Role والـ ID الصحيح للتوكن
+        // إنشاء التوكن بنفس الـ Structure (ID, NationalID, Role)
         const token = jwt.sign(
             { 
-                id: candidate.candidate_id, // استخدام الـ Primary Key
-                national_id: candidate.national_id,
-                role: 'candidate' // ضروري جداً لعملية التصويت
+                id: voter.voter_id, 
+                national_id: voter.national_id,
+                role: 'voter' 
             }, 
             process.env.JWT_SECRET, 
             { expiresIn: '24h' }
@@ -142,60 +145,37 @@ exports.loginCandidate = async (req, res) => {
             success: true, 
             token, 
             user_data: {
-                id: candidate.candidate_id,
-                national_id: candidate.national_id,
-                role: 'candidate',
-                full_name: candidate.full_name // تأكد إن الـ Model بيرجعه
+                id: voter.voter_id,
+                national_id: voter.national_id,
+                full_name: voter.full_name,
+                role: 'voter'
             }
         });
 
     } catch (err) {
-        console.error("Login Error:", err);
+        console.error("Voter Login Error:", err);
         res.status(500).json({ success: false, message: "خطأ في السيرفر" });
     }
 };
 
-// --- 3. جلب البروفايل ---
-exports.getCandidateProfile = async (req, res) => {
+// --- 4. جلب بيانات الكارت الرقمي (للموبايل) ---
+exports.getVoterCard = async (req, res) => {
     try {
-        const profile = await Candidate.getFullProfile(req.params.id);
-        if (!profile) return res.status(404).json({ success: false, message: "المرشح غير موجود" });
-        res.json({ success: true, data: profile });
-    } catch (err) {
-        res.status(500).json({ success: false, message: "خطأ في جلب البيانات" });
-    }
-};
+        const voter = await Voter.findByIdentifier(req.user.id, 'id');
+        if (!voter) return res.status(404).json({ success: false, message: "الناخب غير موجود" });
 
-// --- 4. قائمة المرشحين ---
-exports.listCandidates = async (req, res) => {
-    try {
-        const query = `
-            SELECT 
-                c.national_id, 
-                cr.full_name, 
-                c.occupation, 
-                c.candidate_type,
-                c.election_symbol_url,
-                c.personal_photos_url,
-                c.candidate_id
-            FROM candidates c
-            LEFT JOIN civil_registry cr ON c.national_id = cr.national_id
-            ORDER BY c.created_at DESC
-        `;
-        const { rows } = await pool.query(query);
-        res.json({ success: true, data: rows });
+        res.json({
+            success: true,
+            data: {
+                full_name: voter.full_name,
+                national_id: voter.national_id,
+                v_code: voter.v_code,
+                governorate: voter.governorate_name,
+                administrative_unit: voter.administrative_unit,
+                has_voted: voter.has_voted
+            }
+        });
     } catch (err) {
-        console.error("List Error:", err);
-        res.status(500).json({ success: false, message: "خطأ في تحميل القائمة" });
-    }
-};
-
-// --- 5. عداد الأصوات ---
-exports.getCandidateVotes = async (req, res) => {
-    try {
-        const totalVotes = await Candidate.getCandidateVotes(req.params.id);
-        res.json({ success: true, total_votes: totalVotes });
-    } catch (err) {
-        res.status(500).json({ success: false, message: "خطأ في حساب الأصوات" });
+        res.status(500).json({ success: false, message: "خطأ في جلب بيانات الكارت" });
     }
 };
