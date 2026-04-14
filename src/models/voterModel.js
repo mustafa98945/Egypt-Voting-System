@@ -2,19 +2,18 @@ const pool = require('../config/db');
 
 class Voter {
     // 1. الـ Triple Check - التحقق من وجود المواطن في السجل المدني (Auto-fill)
-    static async verifyInRegistry(nationalId, birthDate, expiryDate) {
+   static async verifyInRegistry(nationalId, birthDate, expiryDate) {
+    // query بسيطة جداً بتجيب البيانات من جدول السجل المدني بس
     const query = `
         SELECT 
-            cr.full_name, 
-            cr.address, 
-            cr.national_id,
-            cr.administrative_unit as unit_name_text, -- سحب الاسم مباشرة من السجل المدني
-            au.unit_id                                -- سحب الـ ID من جدول الوحدات
-        FROM civil_registry cr
-        LEFT JOIN administrative_units au ON TRIM(cr.administrative_unit) = TRIM(au.unit_name)
-        WHERE TRIM(cr.national_id) = TRIM($1) 
-          AND cr.birth_date = $2 
-          AND cr.expiry_date = $3
+            full_name, 
+            address, 
+            national_id,
+            administrative_unit -- هنسحب الاسم النصي مباشرة
+        FROM civil_registry
+        WHERE TRIM(national_id) = TRIM($1) 
+          AND birth_date = $2 
+          AND expiry_date = $3
     `;
     const { rows } = await pool.query(query, [nationalId, birthDate, expiryDate]);
     return rows[0];
