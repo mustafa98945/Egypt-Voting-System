@@ -5,15 +5,24 @@ const auth = require('../middleware/authMiddleware');
 
 /**
  * @route   POST /api/vote/cast
- * @desc    تنفيذ عملية التصويت لمرشح معين
- * @access  Private (يتطلب توكن ناخب أو مرشح)
+ * @desc    تنفيذ عملية التصويت (للناخبين والمرشحين)
+ * @access  Private
  */
 router.post('/cast', auth, voteController.castVote);
 
 /**
- * ملاحظة: 
- * الـ auth middleware سيقوم بفك التوكن وتجهيز req.user.id و req.user.role
- * الـ voteController سيستخدم هذه البيانات للتحقق من الصلاحية وتنفيذ التصويت في قاعدة البيانات
+ * @route   GET /api/vote/status
+ * @desc    التحقق مما إذا كان المستخدم الحالي قد صوت بالفعل أم لا
+ * @access  Private
+ * ملاحظة: دي مهمة جداً للـ Front-end عشان يظهر "تم التصويت" بدل زرار التصويت
+ */
+// لو عندك دالة في الكنترولر للتحقق ممكن تضيفها هنا، لو مش عندك فالـ /cast بتهندل ده
+// router.get('/status', auth, voteController.checkUserVotingStatus);
+
+/**
+ * ملاحظة تقنية:
+ * 1. الـ auth middleware بيضمن إن req.user جاهز.
+ * 2. تم فصل منطق التصويت في Controller مستقل لضمان سهولة الصيانة.
  */
 
 module.exports = router;
