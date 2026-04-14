@@ -21,7 +21,6 @@ const processBase64AndUpload = async (base64String, fileName, folder = 'candidat
                 .toBuffer();
             return await uploadToSupabase(optimized, fileName, folder);
         } catch (sharpError) {
-            // لو sharp فشل لأي سبب، نرفع الـ buffer الأصلي
             return await uploadToSupabase(buffer, fileName, folder);
         }
     } catch (error) {
@@ -30,12 +29,12 @@ const processBase64AndUpload = async (base64String, fileName, folder = 'candidat
     }
 };
 
-// --- 1. تسجيل مرشح جديد (الربط المطور مع السجل المدني) ---
+// --- 1. تسجيل مرشح جديد (مطابق للـ Schema الجديدة) ---
 exports.registerCandidate = async (req, res) => {
     try {
         const data = req.body;
 
-        // الخطوة 1: الـ Triple Check وسحب بيانات السجل المدني
+        // الخطوة 1: التحقق من السجل المدني
         const citizen = await Candidate.verifyRegistry(
             data.national_id, 
             data.birth_date, 
@@ -49,7 +48,7 @@ exports.registerCandidate = async (req, res) => {
             });
         }
 
-        // الخطوة 2: معالجة الـ 5 ملفات الانتخابية ورفعهم (عشان تطلع روابط حقيقية)
+        // الخطوة 2: معالجة الـ 5 ملفات الانتخابية فقط (حسب الـ Schema)
         const candidateElectionFiles = [
             'election_symbol_url', 
             'financial_disclosure_url', 
@@ -64,116 +63,104 @@ exports.registerCandidate = async (req, res) => {
                 const fileName = `${field}_${data.national_id}_${Date.now()}.jpg`;
                 const publicUrl = await processBase64AndUpload(data[field], fileName);
                 if (publicUrl) {
-                    uploadedUrls[field] = publicUrl; // هنا بنخزن الرابط الحقيقي من Supabase
+                    uploadedUrls[field] = publicUrl;
                 }
             }
         }
 
         const hashedPassword = await bcrypt.hash(data.password, 10);
         
-        // الخطوة 3: تجميع البيانات النهائية
+        // الخطوة 3: تجميع البيانات النهائية (الأعمدة الموجودة فعلياً في الجدول فقط)
         const fullCandidateData = {
-            // بيانات السجل المدني
-            username: citizen.username,
-            governorate_name: citizen.governorate, 
-            address_details: citizen.address,   
-            unit_name: citizen.administrative_unit, 
-            degree: citizen.degree,
-            age: citizen.age,
-            gender: citizen.gender,
-            military_service_url: citizen.military_service_url,
-            education_url: citizen.education_qualification_url,
-            birth_certificate_url: citizen.birth_certificate_url,
-            criminal_record_url: citizen.criminal_record_url,
-            national_id_front_url: citizen.national_id_front_url, 
-            national_id_back_url: citizen.national_id_back_url,
-            
-            // بيانات الإدخال
-            email: data.email,
-            password: hashedPassword,
             national_id: data.national_id,
             birth_date: data.birth_date,
             expiry_date: data.expiry_date,
+            email: data.email,
+            password: hashedPassword,
             phone_number: data.phone_number,
             occupation: data.occupation,
             candidate_type: data.candidate_type,
             short_bio: data.short_bio,
-
-            // دمج روابط الرفع الحقيقية (بتعمل Override لو فيه أي روابط قديمة)
             ...uploadedUrls
         };
 
         const newCandidate = await Candidate.create(fullCandidateData);
 
-        // المخرجات المطلوبة لملء الصفحة تلقائياً مع الروابط الحقيقية
+        // إرجاع البيانات المتاحة فقط
         res.status(201).json({ 
             success: true, 
-            message: "تم التحقق من السجل وسحب الأوراق الموثقة بنجاح",
+            message: "تم التسجيل بنجاح",
             data: {
                 candidate_id: newCandidate.candidate_id,
-                username: newCandidate.username,
-                governorate_name: newCandidate.governorate_name,
-                address_details: newCandidate.address_details,
-                unit_name: newCandidate.unit_name,
-                degree: newCandidate.degree,
-                age: newCandidate.age,
-                gender: newCandidate.gender,
                 email: newCandidate.email,
                 national_id: newCandidate.national_id,
-                phone_number: newCandidate.phone_number,
                 occupation: newCandidate.occupation,
                 candidate_type: newCandidate.candidate_type,
-                // الروابط الـ 5 المرفوعة حديثاً
-                election_symbol_url: newCandidate.election_symbol_url,
                 personal_photos_url: newCandidate.personal_photos_url,
-                financial_disclosure_url: newCandidate.financial_disclosure_url,
-                fitness_health_url: newCandidate.fitness_health_url,
-                deposit_receipt_url: newCandidate.deposit_receipt_url,
-                // روابط السجل المدني
-                military_service_url: newCandidate.military_service_url,
-                education_url: newCandidate.education_url,
-                birth_certificate_url: newCandidate.birth_certificate_url,
-                criminal_record_url: newCandidate.criminal_record_url
+                election_symbol_url: newCandidate.election_symbol_url
             }
         });
 
     } catch (err) {
+        console.error("Register Error:", err);
         if (err.code === '23505') return res.status(400).json({ success: false, message: "الرقم القومي أو البريد مسجل مسبقاً" });
         res.status(500).json({ success: false, message: `خطأ فني: ${err.message}` });
     }
 };
 
-// --- تسجيل دخول المرشح ---
+// --- 2. تسجيل دخول المرشح ---
 exports.loginCandidate = async (req, res) => {
     try {
-        const { national_id, email, password } = req.body;
-        const candidate = email ? await Candidate.findByEmail(email) : await Candidate.findByNationalId(national_id);
+        const { national_id, email, password, isFaceAuthenticated } = req.body;
+        let candidate;
 
-        if (!candidate || !(await bcrypt.compare(password, candidate.password))) {
-            return res.status(401).json({ success: false, message: "بيانات الدخول غير صحيحة" });
+        // 1. حالة تسجيل الدخول بالوجه (Face Recognition)
+        if (isFaceAuthenticated && national_id) {
+            candidate = await Candidate.findByNationalId(national_id);
+            if (!candidate) {
+                return res.status(404).json({ success: false, message: "المرشح صاحب هذا الوجه غير مسجل بالنظام" });
+            }
+            // ملاحظة: هنا بنعمل Bypass للباسورد لأن الوجه تم التحقق منه في الـ Front-end أو بموديل متخصص
+        } 
+        
+        // 2. حالة تسجيل الدخول التقليدية (إيميل أو رقم قومي + باسورد)
+        else {
+            candidate = email ? await Candidate.findByEmail(email) : await Candidate.findByNationalId(national_id);
+
+            if (!candidate) {
+                return res.status(401).json({ success: false, message: "بيانات الدخول غير صحيحة" });
+            }
+
+            const isMatch = await bcrypt.compare(password, candidate.password);
+            if (!isMatch) {
+                return res.status(401).json({ success: false, message: "كلمة المرور غير صحيحة" });
+            }
         }
 
+        // إنشاء التوكن (Token) في كل الحالات
         const token = jwt.sign(
-            { id: candidate.candidate_id, role: 'candidate' }, 
+            { id: candidate.national_id, role: 'candidate' }, 
             process.env.JWT_SECRET, 
             { expiresIn: '24h' }
         );
 
         res.status(200).json({ 
             success: true, 
+            message: isFaceAuthenticated ? "تم الدخول بنجاح عبر بصمة الوجه" : "تم الدخول بنجاح",
             token, 
             user_data: { 
-                id: candidate.candidate_id, 
-                username: candidate.username,
-                email: candidate.email
+                id: candidate.national_id, 
+                email: candidate.email,
+                occupation: candidate.occupation
             } 
         });
+
     } catch (err) {
-        res.status(500).json({ success: false, message: "خطأ في السيرفر" });
+        console.error("Login Error:", err);
+        res.status(500).json({ success: false, message: "خطأ في السيرفر أثناء تسجيل الدخول" });
     }
 };
-
-// --- جلب البروفايل ---
+// --- 3. جلب البروفايل ---
 exports.getCandidateProfile = async (req, res) => {
     try {
         const profile = await Candidate.getFullProfile(req.params.id);
@@ -184,34 +171,35 @@ exports.getCandidateProfile = async (req, res) => {
     }
 };
 
-// --- عداد الأصوات ---
+// --- 4. قائمة المرشحين (عرض الاسم من جدول السجل المدني عبر JOIN) ---
+exports.listCandidates = async (req, res) => {
+    try {
+        const query = `
+            SELECT 
+                c.national_id, 
+                cr.full_name, 
+                c.occupation, 
+                c.candidate_type,
+                c.election_symbol_url,
+                c.personal_photos_url
+            FROM candidates c
+            LEFT JOIN civil_registry cr ON c.national_id = cr.national_id
+            ORDER BY c.created_at DESC
+        `;
+        const { rows } = await pool.query(query);
+        res.json({ success: true, data: rows });
+    } catch (err) {
+        console.error("List Error:", err);
+        res.status(500).json({ success: false, message: "خطأ في تحميل القائمة" });
+    }
+};
+
+// --- 5. عداد الأصوات ---
 exports.getCandidateVotes = async (req, res) => {
     try {
         const totalVotes = await Candidate.getCandidateVotes(req.params.id);
         res.json({ success: true, total_votes: totalVotes });
     } catch (err) {
         res.status(500).json({ success: false, message: "خطأ في حساب الأصوات" });
-    }
-};
-
-// --- قائمة المرشحين ---
-exports.listCandidates = async (req, res) => {
-    try {
-        const query = `
-            SELECT 
-                c.candidate_id, 
-                c.username,
-                cr.full_name, 
-                c.occupation, 
-                c.election_symbol_url,
-                c.personal_photos_url
-            FROM candidates c
-            LEFT JOIN civil_registry cr ON TRIM(c.national_id) = TRIM(cr.national_id)
-            ORDER BY c.created_at DESC
-        `;
-        const { rows } = await pool.query(query);
-        res.json({ success: true, data: rows });
-    } catch (err) {
-        res.status(500).json({ success: false, message: "خطأ في تحميل القائمة" });
     }
 };
