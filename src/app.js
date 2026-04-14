@@ -12,10 +12,12 @@ const app = express();
 
 // 2. إعدادات الـ Middleware
 app.use(cors());
-app.use(express.json({ limit: '50mb' })); // لرفع الصور وبصمة الوجه
+
+// الـ limit 50mb عشان معالجة صور بصمة الوجه والبطاقات
+app.use(express.json({ limit: '50mb' })); 
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
-// الصفحة الرئيسية (Check URL)
+// الصفحة الرئيسية (ترحيبية)
 app.get('/', (req, res) => {
     res.send(`
         <div style="text-align: center; margin-top: 50px; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;">
@@ -24,6 +26,7 @@ app.get('/', (req, res) => {
             <div style="background: #f4f4f4; padding: 15px; display: inline-block; border-radius: 8px;">
                 <strong>Active Endpoints:</strong> /api/voters | /api/candidates | /api/vote | /api/stats
             </div>
+            <p style="margin-top: 20px; color: #7f8c8d;">Status: <span style="color: #27ae60;">Online</span> | Year: 2026</p>
         </div>
     `);
 });
@@ -35,21 +38,28 @@ app.use('/api/vote', voteRoutes);
 app.use('/api/stats', statsRoutes);
 
 // 4. معالجة الروابط غير الموجودة (404 Not Found)
-// دي حركة مهمة عشان لو مبرمج الموبايل كتب رابط غلط
 app.use((req, res) => {
-    res.status(404).json({ success: false, message: "هذا الرابط غير موجود في السيرفر" });
+    res.status(404).json({ 
+        success: false, 
+        message: "هذا الرابط غير موجود في السيرفر، تأكد من الـ Endpoint الصحيح" 
+    });
 });
 
 // 5. معالجة الأخطاء العامة (Error Handling)
 app.use((err, req, res, next) => {
+    // معالجة خطأ حجم البيانات الكبير
     if (err.type === 'entity.too.large') {
         return res.status(413).json({ 
             success: false, 
-            message: "حجم البيانات كبير جداً (أكبر من 50 ميجا)" 
+            message: "حجم البيانات كبير جداً، حاول تقليل جودة الصورة" 
         });
     }
-    console.error("Internal Server Error:", err.stack);
-    res.status(500).json({ success: false, message: "حدث خطأ داخلي في السيرفر" });
+    
+    console.error("❌ Internal Server Error:", err.stack);
+    res.status(500).json({ 
+        success: false, 
+        message: "حدث خطأ داخلي في السيرفر، يرجى مراجعة الـ Logs" 
+    });
 });
 
 // 6. تشغيل السيرفر
@@ -57,10 +67,10 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
     console.log(`-----------------------------------------`);
     console.log(`🚀 السيرفر شغال الآن على منفذ: ${PORT}`);
-    console.log(`📡 المسارات النشطة: `);
-    console.log(`   ✅ Voters:     /api/voters`);
-    console.log(`   ✅ Candidates: /api/candidates`);
-    console.log(`   ✅ Voting:     /api/vote/cast`);
-    console.log(`   ✅ Stats:      /api/stats/top-candidates`);
+    console.log(`📡 الروابط المفعلة: `);
+    console.log(`   ✅ الناخبين:     /api/voters`);
+    console.log(`   ✅ المرشحين:     /api/candidates`);
+    console.log(`   ✅ التصويت:      /api/vote`);
+    console.log(`   ✅ الإحصائيات:    /api/stats`);
     console.log(`-----------------------------------------`);
 });
