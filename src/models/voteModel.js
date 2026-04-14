@@ -3,9 +3,9 @@ const pool = require('../config/db');
 const Vote = {
     /**
      * التأكد من حالة تصويت المستخدم (ناخب أو مرشح)
-     * @returns {Object|null} نرجع null لو المستخدم غير موجود لضمان دقة الـ Controller
      */
     checkIfVoted: async (tableName, idColumn, userId) => {
+        // بنستخدم idColumn عشان لو الجدول voters يبقى voter_id ولو candidates يبقى candidate_id
         const query = `SELECT has_voted FROM ${tableName} WHERE ${idColumn} = $1`;
         const result = await pool.query(query, [userId]);
         
@@ -14,7 +14,6 @@ const Vote = {
 
     /**
      * تنفيذ عملية التصويت كـ Transaction
-     * تضمن تسجيل الصوت في جدول votes وتحديث حالة has_voted في الجدول الأصلي
      */
     executeVote: async (userRole, userId, candidateId, tableName, idColumn) => {
         const client = await pool.connect();
@@ -22,14 +21,14 @@ const Vote = {
             await client.query('BEGIN');
 
             // 1. تسجيل عملية التصويت
-            // أضفنا voter_role عشان نعرف لو اللي صوت ده مرشح ولا ناخب (إحصائيات أدق)
+            // ملاحظة: تأكد إن جدول votes في Supabase فيه عمود اسمه voter_role
             const insertQuery = `
                 INSERT INTO votes (voter_id, candidate_id, voter_role, created_at) 
                 VALUES ($1, $2, $3, NOW())
             `;
             await client.query(insertQuery, [userId, candidateId, userRole]);
 
-            // 2. تحديث حالة المستخدم في جدوله (سواء كان candidates أو voters)
+            // 2. تحديث حالة المستخدم (has_voted = TRUE)
             const updateQuery = `
                 UPDATE ${tableName} 
                 SET has_voted = TRUE 
@@ -37,9 +36,8 @@ const Vote = {
             `;
             const updateResult = await client.query(updateQuery, [userId]);
 
-            // تأمين إضافي: لو مفيش صفوف اتحدثت (المعرف غير صحيح)، نلغي العملية فوراً
             if (updateResult.rowCount === 0) {
-                throw new Error("فشل تحديث حالة المستخدم - المعرف غير موجود في جدول " + tableName);
+                throw new Error("فشل تحديث حالة المستخدم - المعرف غير موجود");
             }
 
             await client.query('COMMIT');
