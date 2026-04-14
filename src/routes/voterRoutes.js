@@ -9,20 +9,24 @@ const auth = require('../middleware/authMiddleware');
 // 1. التحقق من البيانات في السجل المدني (قبل التسجيل)
 router.post('/verify', voterController.verifyBeforeRegister);
 
-// 2. تسجيل حساب ناخب جديد (JSON Mode - Base64)
+// 2. تسجيل حساب ناخب جديد
 router.post('/register', voterController.registerVoter);
 
-// 3. تسجيل الدخول (بيرجع التوكن اللي فيه الـ id والـ role)
+// 3. تسجيل الدخول
 router.post('/login', voterController.login);
 
-// 4. جلب بيانات بطاقة الناخب (Voter Card) - محمية
-// 💡 دي الـ Endpoint اللي هتعرض الكارت اللي على اليمين في الـ Figma
+// 4. جلب بيانات بطاقة الناخب (Voter Card) - محمية بالتوكن
+// تأكد إن الدالة دي اسمها getVoterCard في الـ voterController
 router.get('/voter-card', auth, voterController.getVoterCard);
 
 /**
  * 5. عملية التصويت (محمي بـ JWT)
- * الميدل وير (auth) بيفك التوكن وبيجهز req.user
+ * ملاحظة: تأكد من أن الدالة في voteController اسمها castVote
  */
-router.post('/cast-vote', auth, voteController.castVote);
+if (voteController && voteController.castVote) {
+    router.post('/cast-vote', auth, voteController.castVote);
+} else {
+    console.error("⚠️ تنبيه: دالة castVote غير معرفة في voteController");
+}
 
 module.exports = router;

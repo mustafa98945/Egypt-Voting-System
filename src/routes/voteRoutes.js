@@ -6,23 +6,23 @@ const auth = require('../middleware/authMiddleware');
 /**
  * @route   POST /api/vote/cast
  * @desc    تنفيذ عملية التصويت (للناخبين والمرشحين)
- * @access  Private
+ * @access  Private (Requires Token)
  */
-router.post('/cast', auth, voteController.castVote);
+// التأكد من أن voteController.castVote موجودة فعلاً قبل تمريرها
+if (voteController && voteController.castVote) {
+    router.post('/cast', auth, voteController.castVote);
+} else {
+    console.error("⚠️ Error: castVote function is not defined in voteController.js");
+}
 
 /**
  * @route   GET /api/vote/status
- * @desc    التحقق مما إذا كان المستخدم الحالي قد صوت بالفعل أم لا
+ * @desc    التحقق من حالة التصويت للمستخدم الحالي
  * @access  Private
- * ملاحظة: دي مهمة جداً للـ Front-end عشان يظهر "تم التصويت" بدل زرار التصويت
  */
-// لو عندك دالة في الكنترولر للتحقق ممكن تضيفها هنا، لو مش عندك فالـ /cast بتهندل ده
-// router.get('/status', auth, voteController.checkUserVotingStatus);
-
-/**
- * ملاحظة تقنية:
- * 1. الـ auth middleware بيضمن إن req.user جاهز.
- * 2. تم فصل منطق التصويت في Controller مستقل لضمان سهولة الصيانة.
- */
+// يفضل تفعل الـ Route ده عشان الـ Front-end يعرف حالة المستخدم أول ما يفتح الصفحة
+if (voteController && voteController.checkUserVotingStatus) {
+    router.get('/status', auth, voteController.checkUserVotingStatus);
+}
 
 module.exports = router;
