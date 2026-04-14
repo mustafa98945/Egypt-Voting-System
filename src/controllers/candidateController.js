@@ -114,71 +114,45 @@ exports.loginCandidate = async (req, res) => {
         const { national_id, email, password, isFaceAuthenticated } = req.body;
         let candidate;
 
-        // --- المسار الأول: الدخول عن طريق الرقم القومي (بصمة الوجه أو ID فقط) ---
-        if (national_id && !email) {
+        // 1. مسار الرقم القومي (بصمة الوجه أو دخول سريع)
+        if (national_id) {
             candidate = await Candidate.findByNationalId(national_id);
-            
             if (!candidate) {
                 return res.status(404).json({ success: false, message: "الرقم القومي غير مسجل" });
             }
 
-            // لو داخل بالوجه (Face Recognition) بنعمل bypass للباسورد
-            if (!isFaceAuthenticated) {
-                // لو مش وجه، يبقى لازم يبعت باسورد مع الـ ID
-                if (!password) {
-                    return res.status(400).json({ success: false, message: "يرجى إدخال كلمة المرور مع الرقم القومي" });
-                }
+            // لو مش عامل Face Auth، ممكن تخليه يدخل بالـ ID بس (لو ده قصدك) 
+            // أو تجبره على الباسورد.. التعديل ده هيخليه "اختياري":
+            if (!isFaceAuthenticated && password) {
                 const isMatch = await bcrypt.compare(password, candidate.password);
                 if (!isMatch) return res.status(401).json({ success: false, message: "كلمة المرور غير صحيحة" });
             }
+            // لو مبعتش باسورد ولا Flag، والسستم مسموح فيه بالدخول بالـ ID (زي التعرف على الوجه)
         } 
         
-        // --- المسار الثاني: الدخول عن طريق البريد الإلكتروني والباسورد ---
+        // 2. مسار الإيميل (إلزامي باسورد)
         else if (email) {
-            if (!password) {
-                return res.status(400).json({ success: false, message: "كلمة المرور مطلوبة مع البريد الإلكتروني" });
-            }
-
             candidate = await Candidate.findByEmail(email);
-            if (!candidate) {
-                return res.status(404).json({ success: false, message: "البريد الإلكتروني غير مسجل" });
-            }
+            if (!candidate) return res.status(404).json({ success: false, message: "البريد الإلكتروني غير مسجل" });
+
+            if (!password) return res.status(400).json({ success: false, message: "الباسورد مطلوبة مع الإيميل" });
 
             const isMatch = await bcrypt.compare(password, candidate.password);
-            if (!isMatch) {
-                return res.status(401).json({ success: false, message: "بيانات الدخول غير صحيحة" });
-            }
+            if (!isMatch) return res.status(401).json({ success: false, message: "بيانات الدخول غير صحيحة" });
         } 
-        
-        // حالة عدم إرسال أي بيانات
         else {
-            return res.status(400).json({ success: false, message: "يرجى إدخال الرقم القومي أو البريد الإلكتروني" });
+            return res.status(400).json({ success: false, message: "يرجى إدخال الرقم القومي أو البريد" });
         }
 
-        // --- توليد التوكن في حال نجاح أي من المسارين ---
-        const token = jwt.sign(
-            { id: candidate.national_id, role: 'candidate' }, 
-            process.env.JWT_SECRET, 
-            { expiresIn: '24h' }
-        );
+        const token = jwt.sign({ id: candidate.national_id }, process.env.JWT_SECRET, { expiresIn: '24h' });
 
-        res.status(200).json({ 
-            success: true, 
-            message: "تم تسجيل الدخول بنجاح",
-            token, 
-            user_data: { 
-                id: candidate.national_id, 
-                email: candidate.email,
-                occupation: candidate.occupation
-            } 
-        });
+        res.status(200).json({ success: true, token, user_data: candidate });
 
     } catch (err) {
         console.error("Login Error:", err);
         res.status(500).json({ success: false, message: "خطأ في السيرفر" });
     }
-};
-// --- 3. جلب البروفايل ---
+};// --- 3. جلب البروفايل ---
 exports.getCandidateProfile = async (req, res) => {
     try {
         const profile = await Candidate.getFullProfile(req.params.id);
