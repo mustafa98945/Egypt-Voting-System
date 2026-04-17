@@ -1,54 +1,84 @@
 const pool = require('../config/db');
 
 const Vote = {
-    /**
-     * التأكد من حالة تصويت المستخدم (ناخب أو مرشح)
-     */
+
+    // 1. التحقق من حالة التصويت
     checkIfVoted: async (tableName, idColumn, userId) => {
-        // بنستخدم idColumn عشان لو الجدول voters يبقى voter_id ولو candidates يبقى candidate_id
         const query = `SELECT has_voted FROM ${tableName} WHERE ${idColumn} = $1`;
         const result = await pool.query(query, [userId]);
-        
         return result.rows.length > 0 ? result.rows[0] : null;
     },
 
-    /**
-     * تنفيذ عملية التصويت كـ Transaction
-     */
+    // 2. تنفيذ التصويت (Transaction)
     executeVote: async (userRole, userId, candidateId, tableName, idColumn) => {
         const client = await pool.connect();
         try {
             await client.query('BEGIN');
 
-            // 1. تسجيل عملية التصويت
-            // ملاحظة: تأكد إن جدول votes في Supabase فيه عمود اسمه voter_role
-            const insertQuery = `
-                INSERT INTO votes (voter_id, candidate_id, voter_role, created_at) 
-                VALUES ($1, $2, $3, NOW())
-            `;
-            await client.query(insertQuery, [userId, candidateId, userRole]);
+            // تسجيل الصوت في جدول votes
+            await client.query(
+                `INSERT INTO votes (voter_id, candidate_id, voter_role, created_at) 
+                 VALUES ($1, $2, $3, NOW())`,
+                [userId, candidateId, userRole]
+            );
 
-            // 2. تحديث حالة المستخدم (has_voted = TRUE)
-            const updateQuery = `
-                UPDATE ${tableName} 
-                SET has_voted = TRUE 
-                WHERE ${idColumn} = $1
-            `;
-            const updateResult = await client.query(updateQuery, [userId]);
+            // تحديث has_voted
+            const updateResult = await client.query(
+                `UPDATE ${tableName} SET has_voted = TRUE WHERE ${idColumn} = $1`,
+                [userId]
+            );
 
             if (updateResult.rowCount === 0) {
-                throw new Error("فشل تحديث حالة المستخدم - المعرف غير موجود");
+                throw new Error("فشل تحديث حالة المستخدم");
             }
 
             await client.query('COMMIT');
             return { success: true };
-            
+
         } catch (error) {
             await client.query('ROLLBACK');
-            console.error("Database Transaction Error:", error.message);
+            console.error("Transaction Error:", error.message);
             throw error;
         } finally {
             client.release();
+        }
+    },
+
+    // 3. جلب بيانات الـ Vote Card
+    getVoteCard: async (userId, role) => {
+        // لو voter
+        if (role === 'voter') {
+            const query = `
+                SELECT 
+                    cr.full_name,
+                    cr.username        AS v_code,
+                    v.national_id,
+                    cr.governorate,
+                    cr.administrative_unit,
+                    v.has_voted
+                FROM voters v
+                JOIN civil_registry cr ON TRIM(v.national_id) = TRIM(cr.national_id)
+                WHERE v.voter_id = $1
+            `;
+            const { rows } = await pool.query(query, [userId]);
+            return rows[0];
+        }
+        // لو candidate
+        else {
+            const query = `
+                SELECT 
+                    cr.full_name,
+                    cr.username        AS v_code,
+                    c.national_id,
+                    cr.governorate,
+                    cr.administrative_unit,
+                    c.has_voted
+                FROM candidates c
+                JOIN civil_registry cr ON TRIM(c.national_id) = TRIM(cr.national_id)
+                WHERE c.candidate_id = $1
+            `;
+            const { rows } = await pool.query(query, [userId]);
+            return rows[0];
         }
     }
 };
