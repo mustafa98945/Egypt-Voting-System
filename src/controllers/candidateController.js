@@ -5,6 +5,7 @@ const { uploadToSupabase } = require('../utils/supabaseHelper');
 const Candidate = require('../models/candidateModel');
 const pool = require('../config/db');
 
+// --- دالة مساعدة لمعالجة الصور ورفعها ---
 const processBase64AndUpload = async (base64String, fileName, folder = 'candidates') => {
     try {
         if (!base64String || typeof base64String !== 'string') return null;
@@ -27,11 +28,12 @@ const processBase64AndUpload = async (base64String, fileName, folder = 'candidat
     }
 };
 
-// --- 1. تسجيل مرشح ---
+// --- 1. تسجيل مرشح جديد ---
 exports.registerCandidate = async (req, res) => {
     try {
         const data = req.body;
 
+        // التحقق من السجل المدني
         const citizen = await Candidate.verifyRegistry(
             data.national_id, data.birth_date, data.expiry_date
         );
@@ -42,6 +44,7 @@ exports.registerCandidate = async (req, res) => {
             });
         }
 
+        // رفع الملفات والصور
         const candidateElectionFiles = [
             'election_symbol_url', 'financial_disclosure_url',
             'personal_photos_url', 'fitness_health_url', 'deposit_receipt_url'
@@ -67,6 +70,7 @@ exports.registerCandidate = async (req, res) => {
             occupation: data.occupation,
             candidate_type: data.candidate_type,
             short_bio: data.short_bio,
+            electoral_district: citizen.electoral_district, // سحب الدائرة من السجل المدني
             ...uploadedUrls
         };
 
@@ -87,7 +91,7 @@ exports.registerCandidate = async (req, res) => {
     }
 };
 
-// --- 2. تسجيل دخول المرشح ---
+// --- 2. تسجيل دخول المرشح (مع وضع الدائرة في التوكن) ---
 exports.loginCandidate = async (req, res) => {
     try {
         const { national_id, email, password, isFaceAuthenticated } = req.body;
@@ -119,12 +123,13 @@ exports.loginCandidate = async (req, res) => {
             });
         }
 
+        // إنشاء التوكن وإضافة electoral_district فيه 🎯
         const token = jwt.sign(
             {
                 id: candidate.candidate_id,
                 national_id: candidate.national_id,
                 role: 'candidate',
-                electoral_district: candidate.electoral_district
+                electoral_district: candidate.electoral_district // التأكد من وجودها هنا
             },
             process.env.JWT_SECRET,
             { expiresIn: '24h' }
@@ -147,13 +152,15 @@ exports.loginCandidate = async (req, res) => {
     }
 };
 
-// --- 3. قائمة المرشحين (نفس الدائرة فقط) ---
+// --- 3. قائمة المرشحين (الفلترة بدائرة المستخدم) ---
 exports.listCandidates = async (req, res) => {
     try {
+        // سحب الدائرة من التوكن (عن طريق الـ Middleware)
         const userDistrict = req.user.electoral_district;
+        
         if (!userDistrict) {
             return res.status(400).json({
-                success: false, message: "لم يتم تحديد الدائرة الانتخابية"
+                success: false, message: "لم يتم تحديد الدائرة الانتخابية في حسابك"
             });
         }
 
@@ -185,7 +192,7 @@ exports.listCandidates = async (req, res) => {
     }
 };
 
-// --- 4. بروفايل المرشح الكامل (عند الضغط عليه) ---
+// --- 4. بروفايل المرشح الكامل ---
 exports.getCandidateProfile = async (req, res) => {
     try {
         const profile = await Candidate.getFullProfile(req.params.id);
@@ -213,7 +220,7 @@ exports.getCandidateProfile = async (req, res) => {
     }
 };
 
-// --- 5. عدد أصوات مرشح معين ---
+// --- 5. إجمالي أصوات المرشح ---
 exports.getCandidateVotes = async (req, res) => {
     try {
         const totalVotes = await Candidate.getCandidateVotes(req.params.id);
