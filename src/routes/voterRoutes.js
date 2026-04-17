@@ -1,30 +1,18 @@
 const express = require('express');
-const router = express.Router(); // التأكد من التعريف هنا
+const router = express.Router();
 const voterController = require('../controllers/voterController');
 const auth = require('../middleware/authMiddleware');
 
-/**
- * 1. التحقق المبدئي (Auto-fill)
- * POST /api/voters/verify
- */
-router.post('/verify', voterController.verifyBeforeRegister); // التأكد من حرف r وليس l
+// الشاشة الأولى - التحقق والـ Auto-fill
+router.post('/verify', voterController.verifyBeforeRegister);
 
-/**
- * 2. تسجيل حساب ناخب جديد
- * POST /api/voters/register
- */
+// الشاشة التانية - إتمام التسجيل
 router.post('/register', voterController.registerVoter);
 
-/**
- * 3. تسجيل الدخول
- * POST /api/voters/login
- */
+// تسجيل الدخول
 router.post('/login', voterController.login);
 
-/**
- * 4. جلب بيانات الكارت الرقمي
- * GET /api/voters/profile
- */
+// البروفايل (محمي بالـ Auth)
 router.get('/profile', auth, voterController.getVoterCard);
 
 module.exports = router;

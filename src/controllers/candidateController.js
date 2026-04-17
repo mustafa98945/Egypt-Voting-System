@@ -5,27 +5,22 @@ const { uploadToSupabase } = require('../utils/supabaseHelper');
 const Candidate = require('../models/candidateModel');
 const pool = require('../config/db');
 
-// --- دالة مساعدة لمعالجة الـ Base64 ورفعها ---
-// ميزة الدالة دي إنها بتصغر حجم الصور قبل الرفع عشان السيرفر ميهنجش
+// --- دالة مساعدة لمعالجة الـ Base64 ورفعها (مع الضغط) ---
 const processBase64AndUpload = async (base64String, fileName, folder = 'candidates') => {
     try {
         if (!base64String || typeof base64String !== 'string') return null;
-        
-        // فك تشفير الـ Base64 وتحويله لـ Buffer
         const base64Data = base64String.split(';base64,').pop();
         const buffer = Buffer.from(base64Data, 'base64');
         if (buffer.length === 0) return null;
 
         try {
-            // استخدام Sharp لضغط الصورة وتقليل جودتها لـ 70% (توفير مساحة وسرعة)
             const optimized = await sharp(buffer)
-                .rotate() // لتعديل اتجاه الصورة لو متصورة بالموبايل مقلوبة
-                .resize({ width: 1000, withoutEnlargement: true }) // عرض أقصى 1000 بكسل
+                .rotate()
+                .resize({ width: 1000, withoutEnlargement: true })
                 .jpeg({ quality: 70, chromaSubsampling: '4:2:0' }) 
                 .toBuffer();
             return await uploadToSupabase(optimized, fileName, folder);
         } catch (sharpError) {
-            // لو sharp فشل لأي سبب (ملف مش صورة مثلاً)، بنرفع الـ buffer الأصلي
             return await uploadToSupabase(buffer, fileName, folder);
         }
     } catch (error) {
@@ -34,12 +29,12 @@ const processBase64AndUpload = async (base64String, fileName, folder = 'candidat
     }
 };
 
-// --- 1. تسجيل مرشح جديد ---
+// --- 1. تسجيل مرشح جديد (مع سحب الدائرة الانتخابية) ---
 exports.registerCandidate = async (req, res) => {
     try {
         const data = req.body;
 
-        // الخطوة 1: التحقق من السجل المدني (Triple Check)
+        // الخطوة 1: التحقق من السجل المدني وسحب كافة البيانات (بما فيها الدائرة الجديدة)
         const citizen = await Candidate.verifyRegistry(
             data.national_id, 
             data.birth_date, 
@@ -49,11 +44,11 @@ exports.registerCandidate = async (req, res) => {
         if (!citizen) {
             return res.status(401).json({ 
                 success: false, 
-                message: "بيانات الهوية غير مطابقة للسجل المدني أو البطاقة منتهية" 
+                message: "بيانات الهوية غير مطابقة للسجل المدني" 
             });
         }
 
-        // الخطوة 2: معالجة الملفات الكثيرة للمرشح (الصور والمستندات)
+        // الخطوة 2: معالجة الملفات الكثيرة للمرشح
         const candidateElectionFiles = [
             'election_symbol_url', 
             'financial_disclosure_url', 
@@ -67,16 +62,14 @@ exports.registerCandidate = async (req, res) => {
             if (data[field]) {
                 const fileName = `${field}_${data.national_id}_${Date.now()}.jpg`;
                 const publicUrl = await processBase64AndUpload(data[field], fileName);
-                if (publicUrl) {
-                    uploadedUrls[field] = publicUrl;
-                }
+                if (publicUrl) uploadedUrls[field] = publicUrl;
             }
         }
 
         // الخطوة 3: تشفير كلمة المرور
         const hashedPassword = await bcrypt.hash(data.password, 10);
         
-        // الخطوة 4: تجميع البيانات النهائية للحفظ
+        // الخطوة 4: تجميع البيانات النهائية (نقل المحافظة والقسم والدائرة من السجل)
         const fullCandidateData = {
             national_id: data.national_id,
             birth_date: data.birth_date,
@@ -87,6 +80,10 @@ exports.registerCandidate = async (req, res) => {
             occupation: data.occupation,
             candidate_type: data.candidate_type,
             short_bio: data.short_bio,
+            // البيانات الجغرافية المستخرجة
+            governorate: citizen.governorate,
+            section: citizen.section,
+            electoral_district: citizen.electoral_district, 
             ...uploadedUrls
         };
 
@@ -94,16 +91,16 @@ exports.registerCandidate = async (req, res) => {
 
         res.status(201).json({ 
             success: true, 
-            message: "تم تسجيل المرشح بنجاح",
+            message: "تم تسجيل المرشح بنجاح وتسكينه في " + citizen.electoral_district,
             data: {
                 candidate_id: newCandidate.candidate_id,
-                national_id: newCandidate.national_id
+                district: newCandidate.electoral_district
             }
         });
 
     } catch (err) {
         console.error("Register Error:", err);
-        if (err.code === '23505') return res.status(400).json({ success: false, message: "الرقم القومي أو البريد مسجل مسبقاً كمرشح" });
+        if (err.code === '23505') return res.status(400).json({ success: false, message: "الرقم القومي مسجل مسبقاً" });
         res.status(500).json({ success: false, message: `خطأ فني: ${err.message}` });
     }
 };
@@ -114,12 +111,10 @@ exports.loginCandidate = async (req, res) => {
         const { national_id, email, password, isFaceAuthenticated } = req.body;
         let candidate;
 
-        // البحث سواء بالرقم القومي أو الايميل
         if (national_id) {
             candidate = await Candidate.findByNationalId(national_id);
             if (!candidate) return res.status(404).json({ success: false, message: "الرقم القومي غير مسجل" });
 
-            // لو مش داخل ببصمة الوجه، لازم نتشيك على الباسورد
             if (!isFaceAuthenticated && password) {
                 const isMatch = await bcrypt.compare(password, candidate.password);
                 if (!isMatch) return res.status(401).json({ success: false, message: "كلمة المرور غير صحيحة" });
@@ -133,15 +128,16 @@ exports.loginCandidate = async (req, res) => {
             if (!isMatch) return res.status(401).json({ success: false, message: "بيانات الدخول غير صحيحة" });
         } 
         else {
-            return res.status(400).json({ success: false, message: "يرجى إدخال الرقم القومي أو البريد" });
+            return res.status(400).json({ success: false, message: "يرجى إدخال البيانات" });
         }
 
-        // ✅ التعديل الجذري: إضافة الـ Role والـ ID الصحيح للتوكن لضمان صلاحيات التصويت لاحقاً
+        // ✅ التعديل: إضافة الدائرة الانتخابية للتوكن الخاص بالمرشح أيضاً
         const token = jwt.sign(
             { 
                 id: candidate.candidate_id, 
                 national_id: candidate.national_id,
-                role: 'candidate' 
+                role: 'candidate',
+                electoral_district: candidate.electoral_district 
             }, 
             process.env.JWT_SECRET, 
             { expiresIn: '24h' }
@@ -152,9 +148,9 @@ exports.loginCandidate = async (req, res) => {
             token, 
             user_data: {
                 id: candidate.candidate_id,
-                national_id: candidate.national_id,
                 role: 'candidate',
-                full_name: candidate.full_name 
+                full_name: candidate.full_name,
+                district: candidate.electoral_district
             }
         });
 
@@ -164,7 +160,47 @@ exports.loginCandidate = async (req, res) => {
     }
 };
 
-// --- 3. جلب البروفايل ---
+// --- 4. قائمة المرشحين (الفلترة الذكية بناءً على دائرة المستخدم) ---
+exports.listCandidates = async (req, res) => {
+    try {
+        // سحب دائرة المستخدم الحالي من التوكن (سواء كان ناخب أو مرشح)
+        const userDistrict = req.user.electoral_district;
+
+        if (!userDistrict) {
+            return res.status(400).json({ success: false, message: "لم يتم تحديد الدائرة الانتخابية للمستخدم" });
+        }
+
+        const query = `
+            SELECT 
+                c.national_id, 
+                cr.full_name, 
+                c.occupation, 
+                c.candidate_type,
+                c.election_symbol_url,
+                c.personal_photos_url,
+                c.candidate_id,
+                c.electoral_district
+            FROM candidates c
+            LEFT JOIN civil_registry cr ON c.national_id = cr.national_id
+            WHERE c.electoral_district = $1
+            ORDER BY c.created_at DESC
+        `;
+        
+        const { rows } = await pool.query(query, [userDistrict]);
+        
+        res.json({ 
+            success: true, 
+            district: userDistrict,
+            count: rows.length,
+            data: rows 
+        });
+    } catch (err) {
+        console.error("List Error:", err);
+        res.status(500).json({ success: false, message: "خطأ في تحميل القائمة" });
+    }
+};
+
+// --- الدوال الباقية (Profile, Votes) تبقى كما هي ---
 exports.getCandidateProfile = async (req, res) => {
     try {
         const profile = await Candidate.getFullProfile(req.params.id);
@@ -175,31 +211,6 @@ exports.getCandidateProfile = async (req, res) => {
     }
 };
 
-// --- 4. قائمة المرشحين (لعرضها في شاشة التصويت) ---
-exports.listCandidates = async (req, res) => {
-    try {
-        const query = `
-            SELECT 
-                c.national_id, 
-                cr.full_name, 
-                c.occupation, 
-                c.candidate_type,
-                c.election_symbol_url,
-                c.personal_photos_url,
-                c.candidate_id
-            FROM candidates c
-            LEFT JOIN civil_registry cr ON c.national_id = cr.national_id
-            ORDER BY c.created_at DESC
-        `;
-        const { rows } = await pool.query(query);
-        res.json({ success: true, data: rows });
-    } catch (err) {
-        console.error("List Error:", err);
-        res.status(500).json({ success: false, message: "خطأ في تحميل القائمة" });
-    }
-};
-
-// --- 5. عداد الأصوات للمرشح ---
 exports.getCandidateVotes = async (req, res) => {
     try {
         const totalVotes = await Candidate.getCandidateVotes(req.params.id);
