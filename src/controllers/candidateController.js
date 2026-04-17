@@ -5,7 +5,7 @@ const { uploadToSupabase } = require('../utils/supabaseHelper');
 const Candidate = require('../models/candidateModel');
 const pool = require('../config/db');
 
-// --- دالة مساعدة لمعالجة الصور ورفعها ---
+// --- 1. دالة معالجة الصور (بكل تفاصيل الـ Sharp الأصلية) ---
 const processBase64AndUpload = async (base64String, fileName, folder = 'candidates') => {
     try {
         if (!base64String || typeof base64String !== 'string') return null;
@@ -20,6 +20,7 @@ const processBase64AndUpload = async (base64String, fileName, folder = 'candidat
                 .toBuffer();
             return await uploadToSupabase(optimized, fileName, folder);
         } catch {
+            // لو الـ Sharp فشل لأي سبب، ارفع الملف الأصلي
             return await uploadToSupabase(buffer, fileName, folder);
         }
     } catch (error) {
@@ -28,7 +29,7 @@ const processBase64AndUpload = async (base64String, fileName, folder = 'candidat
     }
 };
 
-// --- 1. تسجيل مرشح جديد ---
+// --- 2. تسجيل مرشح جديد (مع Flow الحزب السياسي) ---
 exports.registerCandidate = async (req, res) => {
     try {
         const data = req.body;
@@ -44,14 +45,14 @@ exports.registerCandidate = async (req, res) => {
             });
         }
 
-        // رفع الملفات والصور
+        // رفع الملفات (الحلقـة هترفع بس اللي المستخدم اختاره "Yes")
         const candidateElectionFiles = [
             'election_symbol_url', 'financial_disclosure_url',
             'personal_photos_url', 'fitness_health_url', 'deposit_receipt_url'
         ];
         let uploadedUrls = {};
         for (const field of candidateElectionFiles) {
-            if (data[field]) {
+            if (data[field]) { // لو الحقل موجود (يعني داس Yes ورفع الصورة)
                 const fileName = `${field}_${data.national_id}_${Date.now()}.jpg`;
                 const url = await processBase64AndUpload(data[field], fileName);
                 if (url) uploadedUrls[field] = url;
@@ -60,6 +61,7 @@ exports.registerCandidate = async (req, res) => {
 
         const hashedPassword = await bcrypt.hash(data.password, 10);
 
+        // تجميع كل البيانات (بما فيها الحقول اللي كانت ناقصة)
         const fullCandidateData = {
             national_id: data.national_id,
             birth_date: data.birth_date,
@@ -70,7 +72,7 @@ exports.registerCandidate = async (req, res) => {
             occupation: data.occupation,
             candidate_type: data.candidate_type,
             short_bio: data.short_bio,
-            electoral_district: citizen.electoral_district, // سحب الدائرة من السجل المدني
+            electoral_district: citizen.electoral_district, // سحب الدائرة من السجل
             ...uploadedUrls
         };
 
@@ -91,7 +93,7 @@ exports.registerCandidate = async (req, res) => {
     }
 };
 
-// --- 2. تسجيل دخول المرشح (مع وضع الدائرة في التوكن) ---
+// --- 3. تسجيل الدخول (مع ضمان الدائرة في التوكن) ---
 exports.loginCandidate = async (req, res) => {
     try {
         const { national_id, email, password, isFaceAuthenticated } = req.body;
@@ -123,13 +125,13 @@ exports.loginCandidate = async (req, res) => {
             });
         }
 
-        // إنشاء التوكن وإضافة electoral_district فيه 🎯
+        // التوكن المحتوي على الدائرة للفلترة التلقائية 🎯
         const token = jwt.sign(
             {
                 id: candidate.candidate_id,
                 national_id: candidate.national_id,
                 role: 'candidate',
-                electoral_district: candidate.electoral_district // التأكد من وجودها هنا
+                electoral_district: candidate.electoral_district
             },
             process.env.JWT_SECRET,
             { expiresIn: '24h' }
@@ -152,15 +154,14 @@ exports.loginCandidate = async (req, res) => {
     }
 };
 
-// --- 3. قائمة المرشحين (الفلترة بدائرة المستخدم) ---
+// --- 4. قائمة المرشحين (الفلترة بالدائرة) ---
 exports.listCandidates = async (req, res) => {
     try {
-        // سحب الدائرة من التوكن (عن طريق الـ Middleware)
         const userDistrict = req.user.electoral_district;
         
         if (!userDistrict) {
             return res.status(400).json({
-                success: false, message: "لم يتم تحديد الدائرة الانتخابية في حسابك"
+                success: false, message: "لم يتم تحديد الدائرة الانتخابية"
             });
         }
 
@@ -192,7 +193,7 @@ exports.listCandidates = async (req, res) => {
     }
 };
 
-// --- 4. بروفايل المرشح الكامل ---
+// --- 5. بروفايل المرشح الكامل (كل البيانات) ---
 exports.getCandidateProfile = async (req, res) => {
     try {
         const profile = await Candidate.getFullProfile(req.params.id);
@@ -203,10 +204,13 @@ exports.getCandidateProfile = async (req, res) => {
         res.json({
             success: true,
             data: {
+                candidate_id: profile.candidate_id,
                 full_name: profile.full_name,
                 age: profile.age,
                 degree: profile.degree,
                 governorate: profile.governorate,
+                candidate_type: profile.candidate_type,
+                occupation: profile.occupation,
                 short_bio: profile.short_bio,
                 personal_photos_url: profile.personal_photos_url,
                 election_symbol_url: profile.election_symbol_url
@@ -217,7 +221,7 @@ exports.getCandidateProfile = async (req, res) => {
     }
 };
 
-// --- 5. إجمالي أصوات المرشح ---
+// --- 6. عدد أصوات مرشح معين ---
 exports.getCandidateVotes = async (req, res) => {
     try {
         const totalVotes = await Candidate.getCandidateVotes(req.params.id);
