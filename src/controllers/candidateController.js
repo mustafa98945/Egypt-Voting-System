@@ -5,7 +5,7 @@ const { uploadToSupabase } = require('../utils/supabaseHelper');
 const Candidate = require('../models/candidateModel');
 const pool = require('../config/db');
 
-// --- 1. دالة معالجة الصور (بكل تفاصيل الـ Sharp الأصلية) ---
+// --- 1. دالة معالجة الصور (JPEG Optimization) ---
 const processBase64AndUpload = async (base64String, fileName, folder = 'candidates') => {
     try {
         if (!base64String || typeof base64String !== 'string') return null;
@@ -20,7 +20,6 @@ const processBase64AndUpload = async (base64String, fileName, folder = 'candidat
                 .toBuffer();
             return await uploadToSupabase(optimized, fileName, folder);
         } catch {
-            // لو الـ Sharp فشل لأي سبب، ارفع الملف الأصلي
             return await uploadToSupabase(buffer, fileName, folder);
         }
     } catch (error) {
@@ -29,7 +28,7 @@ const processBase64AndUpload = async (base64String, fileName, folder = 'candidat
     }
 };
 
-// --- 2. تسجيل مرشح جديد (مع Flow الحزب السياسي) ---
+// --- 2. تسجيل مرشح جديد (مع منطق الحزب السياسي الاختياري) ---
 exports.registerCandidate = async (req, res) => {
     try {
         const data = req.body;
@@ -45,14 +44,14 @@ exports.registerCandidate = async (req, res) => {
             });
         }
 
-        // رفع الملفات (الحلقـة هترفع بس اللي المستخدم اختاره "Yes")
+        // رفع الملفات (سيتم رفع فقط ما أرسله المستخدم "Yes")
         const candidateElectionFiles = [
             'election_symbol_url', 'financial_disclosure_url',
             'personal_photos_url', 'fitness_health_url', 'deposit_receipt_url'
         ];
         let uploadedUrls = {};
         for (const field of candidateElectionFiles) {
-            if (data[field]) { // لو الحقل موجود (يعني داس Yes ورفع الصورة)
+            if (data[field]) {
                 const fileName = `${field}_${data.national_id}_${Date.now()}.jpg`;
                 const url = await processBase64AndUpload(data[field], fileName);
                 if (url) uploadedUrls[field] = url;
@@ -61,7 +60,6 @@ exports.registerCandidate = async (req, res) => {
 
         const hashedPassword = await bcrypt.hash(data.password, 10);
 
-        // تجميع كل البيانات (بما فيها الحقول اللي كانت ناقصة)
         const fullCandidateData = {
             national_id: data.national_id,
             birth_date: data.birth_date,
@@ -72,7 +70,7 @@ exports.registerCandidate = async (req, res) => {
             occupation: data.occupation,
             candidate_type: data.candidate_type,
             short_bio: data.short_bio,
-            electoral_district: citizen.electoral_district, // سحب الدائرة من السجل
+            electoral_district: citizen.electoral_district,
             ...uploadedUrls
         };
 
@@ -93,7 +91,7 @@ exports.registerCandidate = async (req, res) => {
     }
 };
 
-// --- 3. تسجيل الدخول (مع ضمان الدائرة في التوكن) ---
+// --- 3. تسجيل الدخول (مع حقن الدائرة في التوكن) ---
 exports.loginCandidate = async (req, res) => {
     try {
         const { national_id, email, password, isFaceAuthenticated } = req.body;
@@ -125,7 +123,6 @@ exports.loginCandidate = async (req, res) => {
             });
         }
 
-        // التوكن المحتوي على الدائرة للفلترة التلقائية 🎯
         const token = jwt.sign(
             {
                 id: candidate.candidate_id,
@@ -154,18 +151,19 @@ exports.loginCandidate = async (req, res) => {
     }
 };
 
-// --- 4. قائمة المرشحين (الفلترة بالدائرة) ---
+// --- 4. قائمة المرشحين (الفلترة بالدائرة + خاصية البحث بالاسم) ---
 exports.listCandidates = async (req, res) => {
     try {
         const userDistrict = req.user.electoral_district;
-        
+        const { search } = req.query; // استقبال كلمة البحث من الرابط (مثال: ?search=أحمد)
+
         if (!userDistrict) {
             return res.status(400).json({
                 success: false, message: "لم يتم تحديد الدائرة الانتخابية"
             });
         }
 
-        const query = `
+        let query = `
             SELECT 
                 c.candidate_id,
                 c.candidate_type,
@@ -177,9 +175,19 @@ exports.listCandidates = async (req, res) => {
             FROM candidates c
             LEFT JOIN civil_registry cr ON TRIM(c.national_id) = TRIM(cr.national_id)
             WHERE TRIM(c.electoral_district) = TRIM($1)
-            ORDER BY c.created_at DESC
         `;
-        const { rows } = await pool.query(query, [userDistrict]);
+
+        const params = [userDistrict];
+
+        // إضافة شرط البحث إذا قام المستخدم بالكتابة في شريط البحث (Figma Search)
+        if (search && search.trim() !== '') {
+            query += ` AND cr.full_name ILIKE $2`;
+            params.push(`%${search.trim()}%`);
+        }
+
+        query += ` ORDER BY c.created_at DESC`;
+
+        const { rows } = await pool.query(query, params);
 
         res.json({
             success: true,
@@ -193,7 +201,7 @@ exports.listCandidates = async (req, res) => {
     }
 };
 
-// --- 5. بروفايل المرشح الكامل (كل البيانات) ---
+// --- 5. بروفايل المرشح الكامل (مطابق لبيانات Figma) ---
 exports.getCandidateProfile = async (req, res) => {
     try {
         const profile = await Candidate.getFullProfile(req.params.id);
@@ -221,7 +229,7 @@ exports.getCandidateProfile = async (req, res) => {
     }
 };
 
-// --- 6. عدد أصوات مرشح معين ---
+// --- 6. إجمالي أصوات مرشح معين ---
 exports.getCandidateVotes = async (req, res) => {
     try {
         const totalVotes = await Candidate.getCandidateVotes(req.params.id);
