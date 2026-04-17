@@ -2,7 +2,7 @@ const pool = require('../config/db');
 
 const Vote = {
 
-    // 1. التحقق من حالة التصويت
+    // 1. التحقق من حالة التصويت (للاستخدام الداخلي في السيرفر)
     checkIfVoted: async (tableName, idColumn, userId) => {
         const query = `SELECT has_voted FROM ${tableName} WHERE ${idColumn} = $1`;
         const result = await pool.query(query, [userId]);
@@ -15,14 +15,12 @@ const Vote = {
         try {
             await client.query('BEGIN');
 
-            // تسجيل الصوت في جدول votes
             await client.query(
                 `INSERT INTO votes (voter_id, candidate_id, voter_role, created_at) 
                  VALUES ($1, $2, $3, NOW())`,
                 [userId, candidateId, userRole]
             );
 
-            // تحديث has_voted
             const updateResult = await client.query(
                 `UPDATE ${tableName} SET has_voted = TRUE WHERE ${idColumn} = $1`,
                 [userId]
@@ -37,42 +35,36 @@ const Vote = {
 
         } catch (error) {
             await client.query('ROLLBACK');
-            console.error("Transaction Error:", error.message);
             throw error;
         } finally {
             client.release();
         }
     },
 
-    // 3. جلب بيانات الـ Vote Card
+    // 3. جلب بيانات الـ Vote Card (مطابق للصورة تماماً بدون has_voted)
     getVoteCard: async (userId, role) => {
-        // لو voter
         if (role === 'voter') {
             const query = `
                 SELECT 
-                    cr.full_name,
-                    cr.username        AS v_code,
-                    v.national_id,
-                    cr.governorate,
-                    cr.administrative_unit,
-                    v.has_voted
+                    cr.full_name           AS "Name",
+                    cr.username            AS "V_code",
+                    v.national_id          AS "National_ID",
+                    cr.governorate         AS "Government",
+                    cr.administrative_unit AS "Administrative_Unit"
                 FROM voters v
                 JOIN civil_registry cr ON TRIM(v.national_id) = TRIM(cr.national_id)
                 WHERE v.voter_id = $1
             `;
             const { rows } = await pool.query(query, [userId]);
             return rows[0];
-        }
-        // لو candidate
-        else {
+        } else {
             const query = `
                 SELECT 
-                    cr.full_name,
-                    cr.username        AS v_code,
-                    c.national_id,
-                    cr.governorate,
-                    cr.administrative_unit,
-                    c.has_voted
+                    cr.full_name           AS "Name",
+                    cr.username            AS "V_code",
+                    c.national_id          AS "National_ID",
+                    cr.governorate         AS "Government",
+                    cr.administrative_unit AS "Administrative_Unit"
                 FROM candidates c
                 JOIN civil_registry cr ON TRIM(c.national_id) = TRIM(cr.national_id)
                 WHERE c.candidate_id = $1
