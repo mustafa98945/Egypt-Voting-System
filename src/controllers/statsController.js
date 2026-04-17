@@ -1,31 +1,21 @@
 const pool = require('../config/db');
 
-// 1. جلب أعلى 5 مرشحين (مع بيانات الصور والمحافظة)
+// 1. جلب ترتيب جميع المرشحين (الاسم، الصورة، وعدد الأصوات) من الأعلى للأقل
 exports.getTopCandidates = async (req, res) => {
     try {
         const query = `
             SELECT 
-                c.candidate_id, 
                 cr.full_name, 
-                c.candidate_type,
-                c.personal_photos_url,   -- رابط الصورة الشخصية
-                c.election_symbol_url,  -- رابط الرمز الانتخابي
-                cr.degree,               -- المؤهل الدراسي
-                cr.governorate,          -- المحافظة (زي ما هي)
-                COUNT(v.voter_id)::INT AS total_votes
+                c.personal_photos_url,
+                COUNT(v.vote_id)::INT AS total_votes
             FROM candidates c
             JOIN civil_registry cr ON TRIM(c.national_id) = TRIM(cr.national_id)
             LEFT JOIN votes v ON c.candidate_id = v.candidate_id
             GROUP BY 
                 c.candidate_id, 
                 cr.full_name, 
-                c.candidate_type, 
-                c.personal_photos_url, 
-                c.election_symbol_url, 
-                cr.degree, 
-                cr.governorate
-            ORDER BY total_votes DESC
-            LIMIT 5;
+                c.personal_photos_url
+            ORDER BY total_votes DESC;
         `;
 
         const result = await pool.query(query);
