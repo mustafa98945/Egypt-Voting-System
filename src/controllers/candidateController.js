@@ -203,13 +203,10 @@ exports.getCandidateProfile = async (req, res) => {
         res.json({
             success: true,
             data: {
-                candidate_id: profile.candidate_id,
                 full_name: profile.full_name,
                 age: profile.age,
                 degree: profile.degree,
                 governorate: profile.governorate,
-                candidate_type: profile.candidate_type,
-                occupation: profile.occupation,
                 short_bio: profile.short_bio,
                 personal_photos_url: profile.personal_photos_url,
                 election_symbol_url: profile.election_symbol_url
