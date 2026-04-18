@@ -95,7 +95,9 @@ exports.registerVoter = async (req, res) => {
         if (data.party_card_url) { 
             // لو المستخدم داس Yes ورفع صورة الكارنيه
             const fileName = `party_card_${data.national_id}_${Date.now()}.jpg`;
-            partyCardUrl = await processBase64AndUpload(data.party_card_url, fileName);
+            partyCardUrl = await processBase64AndUpload(
+    data.party_card_url, fileName, 'voters_cards/voters/party_cards'
+);
         }
 
         // تشفير كلمة المرور

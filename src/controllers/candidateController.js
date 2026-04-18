@@ -28,6 +28,15 @@ const processBase64AndUpload = async (base64String, fileName, folder = 'candidat
     }
 };
 
+// --- مجلدات ملفات المرشح ---
+const candidateFileFolders = {
+    'election_symbol_url':      'candidates/election_symbols',
+    'financial_disclosure_url': 'candidates/financial_disclosures',
+    'personal_photos_url':      'candidates/personal_photos',
+    'fitness_health_url':       'candidates/fitness_health',
+    'deposit_receipt_url':      'candidates/deposit_receipts'
+};
+
 // --- 2. التحقق والـ Auto-fill (الشاشة الأولى) ---
 exports.verifyBeforeRegister = async (req, res) => {
     try {
@@ -36,20 +45,18 @@ exports.verifyBeforeRegister = async (req, res) => {
         if (!national_id || !birth_date || !expiry_date || !email) {
             return res.status(400).json({
                 success: false,
-                message: "الحقول الأساسية مطلوبة: الرقم القومي، تاريخ الميلاد، تاريخ الانتهاء، والبريد"
+                message: "الحقول الأساسية مطلوبة"
             });
         }
 
-        // أ- التحقق من السجل المدني
         const citizen = await Candidate.verifyRegistry(national_id, birth_date, expiry_date);
         if (!citizen) {
             return res.status(401).json({
                 success: false,
-                message: "بيانات الهوية غير مطابقة للسجل المدني أو البطاقة منتهية الصلاحية"
+                message: "بيانات الهوية غير مطابقة للسجل المدني"
             });
         }
 
-        // ب- التحقق من تكرار الـ email أو national_id
         const duplicateQuery = `
             SELECT 
                 CASE WHEN email = $1 THEN 'email' END as email_exists,
@@ -66,7 +73,6 @@ exports.verifyBeforeRegister = async (req, res) => {
             return res.status(400).json({ success: false, message: msg });
         }
 
-        // ✅ إرجاع بيانات السجل للشاشة التانية
         res.json({
             success: true,
             message: "تم التحقق بنجاح",
@@ -88,10 +94,7 @@ exports.verifyBeforeRegister = async (req, res) => {
 
     } catch (err) {
         console.error("Candidate Verify Error:", err);
-        res.status(500).json({
-            success: false,
-            message: `خطأ في السيرفر: ${err.message}`
-        });
+        res.status(500).json({ success: false, message: `خطأ في السيرفر: ${err.message}` });
     }
 };
 
@@ -100,7 +103,6 @@ exports.registerCandidate = async (req, res) => {
     try {
         const data = req.body;
 
-        // إعادة التحقق من السجل
         const citizen = await Candidate.verifyRegistry(
             data.national_id, data.birth_date, data.expiry_date
         );
@@ -111,7 +113,6 @@ exports.registerCandidate = async (req, res) => {
             });
         }
 
-        // إعادة التحقق من التكرار
         const duplicateQuery = `
             SELECT 
                 CASE WHEN email = $1 THEN 'email' END as email_exists,
@@ -128,24 +129,23 @@ exports.registerCandidate = async (req, res) => {
             return res.status(400).json({ success: false, message: msg });
         }
 
-        // رفع ملفات المرشح
-        const candidateElectionFiles = [
-            'election_symbol_url', 'financial_disclosure_url',
-            'personal_photos_url', 'fitness_health_url', 'deposit_receipt_url'
-        ];
+        // رفع ملفات المرشح - كل ملف في مجلده الخاص ✅
         let uploadedUrls = {};
-        for (const field of candidateElectionFiles) {
+        for (const field of Object.keys(candidateFileFolders)) {
             if (data[field]) {
                 const fileName = `${field}_${data.national_id}_${Date.now()}.jpg`;
-                const url = await processBase64AndUpload(data[field], fileName);
+                const folder = candidateFileFolders[field];
+                const url = await processBase64AndUpload(data[field], fileName, folder);
                 if (url) uploadedUrls[field] = url;
             }
         }
 
-        // رفع بطاقة الحزب السياسي (اختيارية)
+        // رفع بطاقة الحزب السياسي في مجلدها الخاص ✅
         if (data.political_party_card) {
             const fileName = `political_party_${data.national_id}_${Date.now()}.jpg`;
-            const url = await processBase64AndUpload(data.political_party_card, fileName);
+            const url = await processBase64AndUpload(
+                data.political_party_card, fileName, 'candidates/party_cards'
+            );
             if (url) uploadedUrls['political_party_card_url'] = url;
         }
 
@@ -316,7 +316,7 @@ exports.getCandidateProfile = async (req, res) => {
     }
 };
 
-// --- 7. إجمالي أصوات مرشح معين ---
+// --- 7. إجمالي أصوات مرشح ---
 exports.getCandidateVotes = async (req, res) => {
     try {
         const totalVotes = await Candidate.getCandidateVotes(req.params.id);
