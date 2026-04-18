@@ -13,7 +13,7 @@ const supabase = createClient(
  */
 exports.uploadToSupabase = async (fileBuffer, fileName, folderName = 'candidates') => {
     // اسم الباكت الرئيسي (تأكد إنه Public في إعدادات Supabase)
-    const bucketName = 'voters_cards'; 
+    const bucketName = 'Users'; 
 
     try {
         // 1. عملية الرفع إلى الـ Storage
