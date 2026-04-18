@@ -5,7 +5,7 @@ const { uploadToSupabase } = require('../utils/supabaseHelper');
 const Candidate = require('../models/candidateModel');
 const pool = require('../config/db');
 
-// --- 1. دالة معالجة الصور (JPEG Optimization) ---
+// --- 1. دالة معالجة الصور ---
 const processBase64AndUpload = async (base64String, fileName, folder = 'candidates') => {
     try {
         if (!base64String || typeof base64String !== 'string') return null;
@@ -28,12 +28,79 @@ const processBase64AndUpload = async (base64String, fileName, folder = 'candidat
     }
 };
 
-// --- 2. تسجيل مرشح جديد (مع منطق الحزب السياسي الاختياري) ---
+// --- 2. التحقق والـ Auto-fill (الشاشة الأولى) ---
+exports.verifyBeforeRegister = async (req, res) => {
+    try {
+        const { national_id, birth_date, expiry_date, email } = req.body;
+
+        if (!national_id || !birth_date || !expiry_date || !email) {
+            return res.status(400).json({
+                success: false,
+                message: "الحقول الأساسية مطلوبة: الرقم القومي، تاريخ الميلاد، تاريخ الانتهاء، والبريد"
+            });
+        }
+
+        // أ- التحقق من السجل المدني
+        const citizen = await Candidate.verifyRegistry(national_id, birth_date, expiry_date);
+        if (!citizen) {
+            return res.status(401).json({
+                success: false,
+                message: "بيانات الهوية غير مطابقة للسجل المدني أو البطاقة منتهية الصلاحية"
+            });
+        }
+
+        // ب- التحقق من تكرار الـ email أو national_id
+        const duplicateQuery = `
+            SELECT 
+                CASE WHEN email = $1 THEN 'email' END as email_exists,
+                CASE WHEN TRIM(national_id) = TRIM($2) THEN 'national_id' END as id_exists
+            FROM candidates
+            WHERE email = $1 OR TRIM(national_id) = TRIM($2)
+            LIMIT 1
+        `;
+        const { rows: dupRows } = await pool.query(duplicateQuery, [email, national_id]);
+        if (dupRows.length > 0) {
+            const msg = dupRows[0].email_exists
+                ? "البريد الإلكتروني مسجل مسبقاً"
+                : "الرقم القومي مسجل مسبقاً كمرشح";
+            return res.status(400).json({ success: false, message: msg });
+        }
+
+        // ✅ إرجاع بيانات السجل للشاشة التانية
+        res.json({
+            success: true,
+            message: "تم التحقق بنجاح",
+            data: {
+                username: citizen.username,
+                governorate: citizen.governorate,
+                address: citizen.address,
+                administrative_unit: citizen.administrative_unit,
+                degree: citizen.degree,
+                age: citizen.age,
+                gender: citizen.gender,
+                electoral_district: citizen.electoral_district,
+                military_service_url: citizen.military_service_url,
+                education_qualification_url: citizen.education_qualification_url,
+                birth_certificate_url: citizen.birth_certificate_url,
+                criminal_record_url: citizen.criminal_record_url
+            }
+        });
+
+    } catch (err) {
+        console.error("Candidate Verify Error:", err);
+        res.status(500).json({
+            success: false,
+            message: `خطأ في السيرفر: ${err.message}`
+        });
+    }
+};
+
+// --- 3. تسجيل مرشح جديد ---
 exports.registerCandidate = async (req, res) => {
     try {
         const data = req.body;
 
-        // التحقق من السجل المدني
+        // إعادة التحقق من السجل
         const citizen = await Candidate.verifyRegistry(
             data.national_id, data.birth_date, data.expiry_date
         );
@@ -44,7 +111,24 @@ exports.registerCandidate = async (req, res) => {
             });
         }
 
-        // رفع الملفات (سيتم رفع فقط ما أرسله المستخدم "Yes")
+        // إعادة التحقق من التكرار
+        const duplicateQuery = `
+            SELECT 
+                CASE WHEN email = $1 THEN 'email' END as email_exists,
+                CASE WHEN TRIM(national_id) = TRIM($2) THEN 'national_id' END as id_exists
+            FROM candidates
+            WHERE email = $1 OR TRIM(national_id) = TRIM($2)
+            LIMIT 1
+        `;
+        const { rows: dupRows } = await pool.query(duplicateQuery, [data.email, data.national_id]);
+        if (dupRows.length > 0) {
+            const msg = dupRows[0].email_exists
+                ? "البريد الإلكتروني مسجل مسبقاً"
+                : "الرقم القومي مسجل مسبقاً";
+            return res.status(400).json({ success: false, message: msg });
+        }
+
+        // رفع ملفات المرشح
         const candidateElectionFiles = [
             'election_symbol_url', 'financial_disclosure_url',
             'personal_photos_url', 'fitness_health_url', 'deposit_receipt_url'
@@ -56,6 +140,13 @@ exports.registerCandidate = async (req, res) => {
                 const url = await processBase64AndUpload(data[field], fileName);
                 if (url) uploadedUrls[field] = url;
             }
+        }
+
+        // رفع بطاقة الحزب السياسي (اختيارية)
+        if (data.political_party_card) {
+            const fileName = `political_party_${data.national_id}_${Date.now()}.jpg`;
+            const url = await processBase64AndUpload(data.political_party_card, fileName);
+            if (url) uploadedUrls['political_party_card_url'] = url;
         }
 
         const hashedPassword = await bcrypt.hash(data.password, 10);
@@ -78,7 +169,7 @@ exports.registerCandidate = async (req, res) => {
 
         res.status(201).json({
             success: true,
-            message: "تم تسجيل المرشح بنجاح",
+            message: `تم تسجيل المرشح بنجاح في دائرة: ${citizen.electoral_district}`,
             data: { candidate_id: newCandidate.candidate_id }
         });
 
@@ -91,7 +182,7 @@ exports.registerCandidate = async (req, res) => {
     }
 };
 
-// --- 3. تسجيل الدخول (مع حقن الدائرة في التوكن) ---
+// --- 4. تسجيل الدخول ---
 exports.loginCandidate = async (req, res) => {
     try {
         const { national_id, email, password, isFaceAuthenticated } = req.body;
@@ -151,11 +242,11 @@ exports.loginCandidate = async (req, res) => {
     }
 };
 
-// --- 4. قائمة المرشحين (الفلترة بالدائرة + خاصية البحث بالاسم) ---
+// --- 5. قائمة المرشحين ---
 exports.listCandidates = async (req, res) => {
     try {
         const userDistrict = req.user.electoral_district;
-        const { search } = req.query; // استقبال كلمة البحث من الرابط (مثال: ?search=أحمد)
+        const { search } = req.query;
 
         if (!userDistrict) {
             return res.status(400).json({
@@ -179,7 +270,6 @@ exports.listCandidates = async (req, res) => {
 
         const params = [userDistrict];
 
-        // إضافة شرط البحث إذا قام المستخدم بالكتابة في شريط البحث (Figma Search)
         if (search && search.trim() !== '') {
             query += ` AND cr.full_name ILIKE $2`;
             params.push(`%${search.trim()}%`);
@@ -201,7 +291,7 @@ exports.listCandidates = async (req, res) => {
     }
 };
 
-// --- 5. بروفايل المرشح الكامل (مطابق لبيانات Figma) ---
+// --- 6. بروفايل المرشح ---
 exports.getCandidateProfile = async (req, res) => {
     try {
         const profile = await Candidate.getFullProfile(req.params.id);
@@ -212,13 +302,10 @@ exports.getCandidateProfile = async (req, res) => {
         res.json({
             success: true,
             data: {
-                candidate_id: profile.candidate_id,
                 full_name: profile.full_name,
                 age: profile.age,
                 degree: profile.degree,
                 governorate: profile.governorate,
-                candidate_type: profile.candidate_type,
-                occupation: profile.occupation,
                 short_bio: profile.short_bio,
                 personal_photos_url: profile.personal_photos_url,
                 election_symbol_url: profile.election_symbol_url
@@ -229,7 +316,7 @@ exports.getCandidateProfile = async (req, res) => {
     }
 };
 
-// --- 6. إجمالي أصوات مرشح معين ---
+// --- 7. إجمالي أصوات مرشح معين ---
 exports.getCandidateVotes = async (req, res) => {
     try {
         const totalVotes = await Candidate.getCandidateVotes(req.params.id);
