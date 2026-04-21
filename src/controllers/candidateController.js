@@ -132,13 +132,19 @@ exports.registerCandidate = async (req, res) => {
         // رفع ملفات المرشح - كل ملف في مجلده الخاص ✅
         let uploadedUrls = {};
         for (const field of Object.keys(candidateFileFolders)) {
-            if (data[field]) {
-                const fileName = `${field}_${data.national_id}_${Date.now()}.jpg`;
-                const folder = candidateFileFolders[field];
-                const url = await processBase64AndUpload(data[field], fileName, folder);
-                if (url) uploadedUrls[field] = url;
-            }
+    if (data[field]) {
+        if (data[field].startsWith('http')) {
+            // لو URL جاهز → خده زي ما هو
+            uploadedUrls[field] = data[field];
+        } else {
+            // لو base64 → ارفعه على Supabase
+            const fileName = `${field}_${data.national_id}_${Date.now()}.jpg`;
+            const folder = candidateFileFolders[field];
+            const url = await processBase64AndUpload(data[field], fileName, folder);
+            if (url) uploadedUrls[field] = url;
         }
+    }
+}
 
         // رفع بطاقة الحزب السياسي في مجلدها الخاص ✅
         if (data.political_party_card) {
