@@ -5,7 +5,6 @@ const { uploadToSupabase } = require('../utils/supabaseHelper');
 const Candidate = require('../models/candidateModel');
 const pool = require('../config/db');
 
-// --- 1. دالة معالجة الصور ---
 const processBase64AndUpload = async (base64String, fileName, folder = 'candidates') => {
     try {
         if (!base64String || typeof base64String !== 'string') return null;
@@ -28,7 +27,6 @@ const processBase64AndUpload = async (base64String, fileName, folder = 'candidat
     }
 };
 
-// --- مجلدات ملفات المرشح ---
 const candidateFileFolders = {
     'election_symbol_url':      'candidates/election_symbols',
     'financial_disclosure_url': 'candidates/financial_disclosures',
@@ -37,7 +35,7 @@ const candidateFileFolders = {
     'deposit_receipt_url':      'candidates/deposit_receipts'
 };
 
-// --- 2. التحقق والـ Auto-fill (الشاشة الأولى) ---
+// --- 1. التحقق والـ Auto-fill ---
 exports.verifyBeforeRegister = async (req, res) => {
     try {
         const { national_id, birth_date, expiry_date, email } = req.body;
@@ -98,7 +96,7 @@ exports.verifyBeforeRegister = async (req, res) => {
     }
 };
 
-// --- 3. تسجيل مرشح جديد ---
+// --- 2. تسجيل مرشح جديد ---
 exports.registerCandidate = async (req, res) => {
     try {
         const data = req.body;
@@ -129,24 +127,20 @@ exports.registerCandidate = async (req, res) => {
             return res.status(400).json({ success: false, message: msg });
         }
 
-        // رفع ملفات المرشح - كل ملف في مجلده الخاص ✅
         let uploadedUrls = {};
         for (const field of Object.keys(candidateFileFolders)) {
-    if (data[field]) {
-        if (data[field].startsWith('http')) {
-            // لو URL جاهز → خده زي ما هو
-            uploadedUrls[field] = data[field];
-        } else {
-            // لو base64 → ارفعه على Supabase
-            const fileName = `${field}_${data.national_id}_${Date.now()}.jpg`;
-            const folder = candidateFileFolders[field];
-            const url = await processBase64AndUpload(data[field], fileName, folder);
-            if (url) uploadedUrls[field] = url;
+            if (data[field]) {
+                if (data[field].startsWith('http')) {
+                    uploadedUrls[field] = data[field];
+                } else {
+                    const fileName = `${field}_${data.national_id}_${Date.now()}.jpg`;
+                    const folder = candidateFileFolders[field];
+                    const url = await processBase64AndUpload(data[field], fileName, folder);
+                    if (url) uploadedUrls[field] = url;
+                }
+            }
         }
-    }
-}
 
-        // رفع بطاقة الحزب السياسي في مجلدها الخاص ✅
         if (data.political_party_card) {
             const fileName = `political_party_${data.national_id}_${Date.now()}.jpg`;
             const url = await processBase64AndUpload(
@@ -175,7 +169,7 @@ exports.registerCandidate = async (req, res) => {
 
         res.status(201).json({
             success: true,
-            message: `تم تسجيل المرشح بنجاح في دائرة: ${citizen.electoral_district}`,
+            message: `تم تسجيل المرشح بنجاح`,
             data: { candidate_id: newCandidate.candidate_id }
         });
 
@@ -188,7 +182,7 @@ exports.registerCandidate = async (req, res) => {
     }
 };
 
-// --- 4. تسجيل الدخول ---
+// --- 3. تسجيل الدخول ---
 exports.loginCandidate = async (req, res) => {
     try {
         const { national_id, email, password, isFaceAuthenticated } = req.body;
@@ -225,7 +219,8 @@ exports.loginCandidate = async (req, res) => {
                 id: candidate.candidate_id,
                 national_id: candidate.national_id,
                 role: 'candidate',
-                electoral_district: candidate.electoral_district
+                administrative_unit: candidate.administrative_unit, // ← جديد للفلترة
+                electoral_district: candidate.electoral_district    // ← محتفظ بيه للـ Flutter
             },
             process.env.JWT_SECRET,
             { expiresIn: '24h' }
@@ -238,7 +233,8 @@ exports.loginCandidate = async (req, res) => {
                 id: candidate.candidate_id,
                 role: 'candidate',
                 full_name: candidate.full_name,
-                district: candidate.electoral_district
+                district: candidate.administrative_unit, // ← نفس الاسم للـ Flutter
+                administrative_unit: candidate.administrative_unit
             }
         });
 
@@ -248,15 +244,16 @@ exports.loginCandidate = async (req, res) => {
     }
 };
 
-// --- 5. قائمة المرشحين ---
+// --- 4. قائمة المرشحين (فلترة بالـ administrative_unit) ---
 exports.listCandidates = async (req, res) => {
     try {
-        const userDistrict = req.user.electoral_district;
+        const userUnit = req.user.administrative_unit; // ← بدل electoral_district
         const { search } = req.query;
 
-        if (!userDistrict) {
+        if (!userUnit) {
             return res.status(400).json({
-                success: false, message: "لم يتم تحديد الدائرة الانتخابية"
+                success: false, 
+                message: "لم يتم تحديد الوحدة الإدارية"
             });
         }
 
@@ -268,13 +265,14 @@ exports.listCandidates = async (req, res) => {
                 c.election_symbol_url,
                 c.occupation,
                 cr.full_name,
-                cr.governorate
+                cr.governorate,
+                cr.administrative_unit
             FROM candidates c
             LEFT JOIN civil_registry cr ON TRIM(c.national_id) = TRIM(cr.national_id)
-            WHERE TRIM(c.electoral_district) = TRIM($1)
+            WHERE TRIM(cr.administrative_unit) = TRIM($1)
         `;
 
-        const params = [userDistrict];
+        const params = [userUnit];
 
         if (search && search.trim() !== '') {
             query += ` AND cr.full_name ILIKE $2`;
@@ -287,7 +285,8 @@ exports.listCandidates = async (req, res) => {
 
         res.json({
             success: true,
-            district: userDistrict,
+            administrative_unit: userUnit,
+            district: userUnit, // ← محتفظ بيه للـ Flutter
             count: rows.length,
             data: rows
         });
@@ -297,7 +296,7 @@ exports.listCandidates = async (req, res) => {
     }
 };
 
-// --- 6. بروفايل المرشح ---
+// --- 5. بروفايل المرشح ---
 exports.getCandidateProfile = async (req, res) => {
     try {
         const profile = await Candidate.getFullProfile(req.params.id);
@@ -322,7 +321,7 @@ exports.getCandidateProfile = async (req, res) => {
     }
 };
 
-// --- 7. إجمالي أصوات مرشح ---
+// --- 6. إجمالي أصوات مرشح ---
 exports.getCandidateVotes = async (req, res) => {
     try {
         const totalVotes = await Candidate.getCandidateVotes(req.params.id);

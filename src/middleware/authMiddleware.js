@@ -27,7 +27,8 @@ const authMiddleware = (req, res, next) => {
             id: userId,
             role: userRole,
             national_id: decoded.national_id || null,
-            electoral_district: decoded.electoral_district || null  // ⬅️ مهم للفلترة
+            administrative_unit: decoded.administrative_unit || null, // ← جديد للفلترة
+            electoral_district: decoded.electoral_district || null    // ← محتفظ بيه للـ Flutter
         };
 
         next();
