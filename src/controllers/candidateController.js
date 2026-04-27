@@ -6,7 +6,7 @@ const Candidate = require('../models/candidateModel');
 const pool = require('../config/db');
 
 ////////////////////////////////////////////////////////////
-// ✅ رفع الصور
+// ✅ رفع الصور (محتفظ بيه كما هو)
 ////////////////////////////////////////////////////////////
 const processBase64AndUpload = async (base64String, fileName, folder = 'candidates') => {
     try {
@@ -64,7 +64,7 @@ exports.verifyBeforeRegister = async (req, res) => {
 };
 
 ////////////////////////////////////////////////////////////
-// ✅ REGISTER
+// ✅ REGISTER (محتفظ بكل الحقول)
 ////////////////////////////////////////////////////////////
 exports.registerCandidate = async (req, res) => {
     try {
@@ -94,7 +94,12 @@ exports.registerCandidate = async (req, res) => {
             phone_number: data.phone_number,
             occupation: data.occupation,
             candidate_type: data.candidate_type,
-            short_bio: data.short_bio
+            short_bio: data.short_bio,
+            election_symbol_url: data.election_symbol_url,
+            personal_photos_url: data.personal_photos_url,
+            financial_disclosure_url: data.financial_disclosure_url,
+            fitness_health_url: data.fitness_health_url,
+            deposit_receipt_url: data.deposit_receipt_url
         });
 
         res.status(201).json({
@@ -160,7 +165,7 @@ exports.loginCandidate = async (req, res) => {
 };
 
 ////////////////////////////////////////////////////////////
-// ✅ LIST (مع حساب العمر)
+// ✅ LIST (مع حساب العمر من birth_date)
 ////////////////////////////////////////////////////////////
 exports.listCandidates = async (req, res) => {
     try {
@@ -240,10 +245,41 @@ exports.getCandidateProfile = async (req, res) => {
     } catch (err) {
         res.status(500).json({
             success: false,
-            message: "Error loading profile"
+            message: err.message
         });
     }
 };
+
+////////////////////////////////////////////////////////////
+// ✅ PUBLIC PROFILE (عرض مرشح معين بالـ id)
+////////////////////////////////////////////////////////////
+exports.getFullPublicProfile = async (req, res) => {
+    try {
+
+        const candidateId = req.params.id;
+
+        const profile = await Candidate.getFullProfile(candidateId);
+
+        if (!profile) {
+            return res.status(404).json({
+                success: false,
+                message: "Candidate not found"
+            });
+        }
+
+        res.json({
+            success: true,
+            data: profile
+        });
+
+    } catch (err) {
+        res.status(500).json({
+            success: false,
+            message: err.message
+        });
+    }
+};
+
 
 ////////////////////////////////////////////////////////////
 // ✅ VOTES
