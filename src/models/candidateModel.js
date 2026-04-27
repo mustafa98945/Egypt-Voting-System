@@ -2,19 +2,25 @@ const pool = require('../config/db');
 
 class Candidate {
 
-    // 1. التحقق من السجل المدني
+    ////////////////////////////////////////////////////////////
+    // ✅ 1. التحقق من السجل المدني
+    ////////////////////////////////////////////////////////////
     static async verifyRegistry(nationalId, birthDate, expiryDate) {
         const query = `
-            SELECT * FROM civil_registry 
-            WHERE TRIM(national_id) = TRIM($1) 
-            AND birth_date = $2 
-            AND expiry_date = $3
+            SELECT *
+            FROM civil_registry 
+            WHERE TRIM(national_id) = TRIM($1)
+              AND birth_date = $2
+              AND expiry_date = $3
+            LIMIT 1
         `;
         const { rows } = await pool.query(query, [nationalId, birthDate, expiryDate]);
         return rows[0];
     }
 
-    // 2. إنشاء مرشح جديد
+    ////////////////////////////////////////////////////////////
+    // ✅ 2. إنشاء مرشح
+    ////////////////////////////////////////////////////////////
     static async create(data) {
         const query = `
             INSERT INTO candidates (
@@ -33,10 +39,12 @@ class Candidate {
                 fitness_health_url,
                 deposit_receipt_url
             ) VALUES (
-                $1, $2, $3, $4, $5, $6, $7, $8, $9,
-                $10, $11, $12, $13, $14
-            ) RETURNING *
+                $1,$2,$3,$4,$5,$6,$7,$8,$9,
+                $10,$11,$12,$13,$14
+            )
+            RETURNING *
         `;
+
         const values = [
             data.national_id,
             data.birth_date,
@@ -53,50 +61,87 @@ class Candidate {
             data.fitness_health_url,
             data.deposit_receipt_url
         ];
+
         const { rows } = await pool.query(query, values);
         return rows[0];
     }
 
-    // 3. البحث بالرقم القومي
+    ////////////////////////////////////////////////////////////
+    // ✅ 3. البحث بالرقم القومي (مع administrative_unit)
+    ////////////////////////////////////////////////////////////
     static async findByNationalId(nationalId) {
-        const query = `SELECT * FROM candidates WHERE TRIM(national_id) = TRIM($1)`;
+        const query = `
+            SELECT 
+                c.*,
+                cr.full_name,
+                cr.governorate,
+                cr.administrative_unit
+            FROM candidates c
+            JOIN civil_registry cr
+              ON TRIM(c.national_id) = TRIM(cr.national_id)
+            WHERE TRIM(c.national_id) = TRIM($1)
+            LIMIT 1
+        `;
+
         const { rows } = await pool.query(query, [nationalId]);
         return rows[0];
     }
 
-    // 4. البحث بالبريد الإلكتروني
+    ////////////////////////////////////////////////////////////
+    // ✅ 4. البحث بالبريد الإلكتروني (مهم للـ login)
+    ////////////////////////////////////////////////////////////
     static async findByEmail(email) {
-        const query = `SELECT * FROM candidates WHERE email = $1`;
+        const query = `
+            SELECT 
+                c.*,
+                cr.full_name,
+                cr.governorate,
+                cr.administrative_unit
+            FROM candidates c
+            JOIN civil_registry cr
+              ON TRIM(c.national_id) = TRIM(cr.national_id)
+            WHERE c.email = $1
+            LIMIT 1
+        `;
+
         const { rows } = await pool.query(query, [email]);
         return rows[0];
     }
 
-    // 5. البروفايل الكامل
+    ////////////////////////////////////////////////////////////
+    // ✅ 5. البروفايل الكامل
+    ////////////////////////////////////////////////////////////
     static async getFullProfile(candidateId) {
         const query = `
             SELECT 
                 c.*,
                 cr.full_name,
                 cr.governorate,
-                cr.administrative_unit as unit_name,
+                cr.administrative_unit,
                 cr.gender,
                 cr.age,
                 cr.degree
             FROM candidates c
-            LEFT JOIN civil_registry cr ON TRIM(c.national_id) = TRIM(cr.national_id)
+            LEFT JOIN civil_registry cr
+              ON TRIM(c.national_id) = TRIM(cr.national_id)
             WHERE c.candidate_id = $1
+            LIMIT 1
         `;
+
         const { rows } = await pool.query(query, [candidateId]);
         return rows[0];
     }
 
-    // 6. إجمالي الأصوات
+    ////////////////////////////////////////////////////////////
+    // ✅ 6. إجمالي الأصوات
+    ////////////////////////////////////////////////////////////
     static async getCandidateVotes(candidateId) {
         const query = `
-            SELECT COUNT(*)::INT as total_votes 
-            FROM votes 
+            SELECT COUNT(*)::INT AS total_votes
+            FROM votes
             WHERE candidate_id = $1
         `;
+
         const { rows } = await pool.query(query, [candidateId]);
         return rows[0]?.total_votes || 0;
     }

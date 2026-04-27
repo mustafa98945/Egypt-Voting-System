@@ -2,17 +2,18 @@ const pool = require('../config/db');
 
 class Voter {
 
-    // 1) التحقق من السجل المدني (national_id + birth_date + expiry_date)
+    ////////////////////////////////////////////////////////////
+    // ✅ 1. التحقق من السجل المدني
+    ////////////////////////////////////////////////////////////
     static async verifyInRegistry(nationalId, birthDate, expiryDate) {
         const query = `
             SELECT 
-                TRIM(national_id)                         AS national_id,
+                TRIM(national_id) AS national_id,
                 full_name,
-                NULLIF(TRIM(username), '')                AS username,
+                username,
                 address,
                 governorate,
-                administrative_unit,
-                NULLIF(TRIM(electoral_district), '')      AS electoral_district
+                administrative_unit
             FROM civil_registry
             WHERE TRIM(national_id) = TRIM($1)
               AND birth_date = $2::date
@@ -23,54 +24,56 @@ class Voter {
         return rows[0];
     }
 
-    // 2) التحقق من التكرار (email أو national_id) داخل voters
+    ////////////////////////////////////////////////////////////
+    // ✅ 2. التحقق من التكرار
+    ////////////////////////////////////////////////////////////
     static async checkDuplicate(email, nationalId) {
         const query = `
-            SELECT 
-                CASE WHEN email = $1 THEN 'email' END as email_exists,
-                CASE WHEN TRIM(national_id) = TRIM($2) THEN 'national_id' END as id_exists
+            SELECT 1
             FROM voters
-            WHERE email = $1 OR TRIM(national_id) = TRIM($2)
+            WHERE email = $1
+               OR TRIM(national_id) = TRIM($2)
             LIMIT 1
         `;
         const { rows } = await pool.query(query, [email, nationalId]);
         return rows[0];
     }
 
-    // 3) إنشاء ناخب جديد
+    ////////////////////////////////////////////////////////////
+    // ✅ 3. إنشاء ناخب
+    ////////////////////////////////////////////////////////////
     static async create(voterData) {
         const { national_id, email, password, party_card_url } = voterData;
 
         const query = `
             INSERT INTO voters (national_id, email, password, party_card_url)
             VALUES ($1, $2, $3, $4)
-            RETURNING voter_id, national_id, email, has_voted, created_at, party_card_url
+            RETURNING *
         `;
-        const values = [national_id, email, password, party_card_url || null];
-        const { rows } = await pool.query(query, values);
+        const { rows } = await pool.query(query, [
+            national_id,
+            email,
+            password,
+            party_card_url || null
+        ]);
+
         return rows[0];
     }
 
-    // 4) البحث بالرقم القومي + جلب بيانات السجل المدني (مهم للـ Login بالوجه)
+    ////////////////////////////////////////////////////////////
+    // ✅ 4. البحث بالرقم القومي (مع administrative_unit)
+    ////////////////////////////////////////////////////////////
     static async findByNationalId(nationalId) {
         const query = `
             SELECT 
-                v.voter_id,
-                TRIM(v.national_id)                        AS national_id,
-                v.email,
-                v.password,
-                v.has_voted,
-                v.created_at,
-                v.party_card_url,
-
+                v.*,
                 cr.full_name,
-                NULLIF(TRIM(cr.username), '')              AS username,
+                cr.username,
                 cr.address,
                 cr.governorate,
-                cr.administrative_unit,
-                NULLIF(TRIM(cr.electoral_district), '')    AS electoral_district
+                cr.administrative_unit
             FROM voters v
-            JOIN civil_registry cr 
+            JOIN civil_registry cr
               ON TRIM(v.national_id) = TRIM(cr.national_id)
             WHERE TRIM(v.national_id) = TRIM($1)
             LIMIT 1
@@ -79,26 +82,20 @@ class Voter {
         return rows[0];
     }
 
-    // 5) البحث بالبريد الإلكتروني + جلب بيانات السجل المدني (مهم للـ Login بالباسورد)
+    ////////////////////////////////////////////////////////////
+    // ✅ 5. البحث بالبريد الإلكتروني
+    ////////////////////////////////////////////////////////////
     static async findByEmail(email) {
         const query = `
             SELECT 
-                v.voter_id,
-                TRIM(v.national_id)                        AS national_id,
-                v.email,
-                v.password,
-                v.has_voted,
-                v.created_at,
-                v.party_card_url,
-
+                v.*,
                 cr.full_name,
-                NULLIF(TRIM(cr.username), '')              AS username,
+                cr.username,
                 cr.address,
                 cr.governorate,
-                cr.administrative_unit,
-                NULLIF(TRIM(cr.electoral_district), '')    AS electoral_district
+                cr.administrative_unit
             FROM voters v
-            JOIN civil_registry cr 
+            JOIN civil_registry cr
               ON TRIM(v.national_id) = TRIM(cr.national_id)
             WHERE v.email = $1
             LIMIT 1
@@ -107,25 +104,20 @@ class Voter {
         return rows[0];
     }
 
-    // 6) البحث بالـ voter_id (للـ profile / voter-card)
+    ////////////////////////////////////////////////////////////
+    // ✅ 6. جلب بيانات الكارت
+    ////////////////////////////////////////////////////////////
     static async findByIdentifier(voterId) {
         const query = `
             SELECT 
-                v.voter_id,
-                TRIM(v.national_id)                        AS national_id,
-                v.email,
-                v.has_voted,
-                v.created_at,
-                v.party_card_url,
-
+                v.*,
                 cr.full_name,
-                NULLIF(TRIM(cr.username), '')              AS username,
+                cr.username,
                 cr.address,
                 cr.governorate,
-                cr.administrative_unit,
-                NULLIF(TRIM(cr.electoral_district), '')    AS electoral_district
+                cr.administrative_unit
             FROM voters v
-            JOIN civil_registry cr 
+            JOIN civil_registry cr
               ON TRIM(v.national_id) = TRIM(cr.national_id)
             WHERE v.voter_id = $1
             LIMIT 1
@@ -134,11 +126,13 @@ class Voter {
         return rows[0];
     }
 
-    // 7) تحديث حالة التصويت
+    ////////////////////////////////////////////////////////////
+    // ✅ 7. تحديث حالة التصويت
+    ////////////////////////////////////////////////////////////
     static async markAsVoted(voterId) {
         const query = `
-            UPDATE voters 
-            SET has_voted = TRUE 
+            UPDATE voters
+            SET has_voted = TRUE
             WHERE voter_id = $1
             RETURNING has_voted
         `;
