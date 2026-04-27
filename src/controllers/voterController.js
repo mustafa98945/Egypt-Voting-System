@@ -3,7 +3,7 @@ const jwt = require('jsonwebtoken');
 const sharp = require('sharp');
 const { uploadToSupabase } = require('../utils/supabaseHelper');
 const Voter = require('../models/voterModel');
-
+console.log("✅ VoterController Loaded Successfully");
 ////////////////////////////////////////////////////////////
 // ✅ رفع الصور
 ////////////////////////////////////////////////////////////
@@ -164,7 +164,7 @@ exports.login = async (req, res) => {
 };
 
 ////////////////////////////////////////////////////////////
-// ✅ VOTER CARD
+// ✅ VOTER CARD .
 ////////////////////////////////////////////////////////////
 exports.getVoterCard = async (req, res) => {
     try {
