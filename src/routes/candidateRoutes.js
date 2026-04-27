@@ -1,23 +1,21 @@
 const express = require('express');
 const router = express.Router();
 const candidateController = require('../controllers/candidateController');
+const auth = require('../middleware/authMiddleware'); // ✅ لازم تضيف ده
 
-// الشاشة الأولى - التحقق والـ Auto-fill
+// التحقق
 router.post('/verify', candidateController.verifyBeforeRegister);
 
-// إتمام التسجيل
+// تسجيل
 router.post('/register', candidateController.registerCandidate);
 
-// تسجيل الدخول
+// تسجيل دخول
 router.post('/loginCandidate', candidateController.loginCandidate);
 
-// قائمة المرشحين
-router.get('/list', candidateController.listCandidates);
+// ✅ لازم تضيف auth هنا
+router.get('/list', auth, candidateController.listCandidates);
 
-// بروفايل مرشح
-router.get('/profile/:id', candidateController.getCandidateProfile);
-
-// أصوات مرشح
-router.get('/votes/:id', candidateController.getCandidateVotes);
+router.get('/profile/:id', auth, candidateController.getCandidateProfile);
+router.get('/votes/:id', auth, candidateController.getCandidateVotes);
 
 module.exports = router;
