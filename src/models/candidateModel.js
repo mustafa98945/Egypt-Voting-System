@@ -67,7 +67,7 @@ class Candidate {
     }
 
     ////////////////////////////////////////////////////////////
-    // ✅ 3. البحث بالرقم القومي (مع administrative_unit)
+    // ✅ 3. البحث بالرقم القومي
     ////////////////////////////////////////////////////////////
     static async findByNationalId(nationalId) {
         const query = `
@@ -88,7 +88,7 @@ class Candidate {
     }
 
     ////////////////////////////////////////////////////////////
-    // ✅ 4. البحث بالبريد الإلكتروني (مهم للـ login)
+    // ✅ 4. البحث بالبريد الإلكتروني
     ////////////////////////////////////////////////////////////
     static async findByEmail(email) {
         const query = `
@@ -109,20 +109,21 @@ class Candidate {
     }
 
     ////////////////////////////////////////////////////////////
-    // ✅ 5. البروفايل الكامل
+    // ✅ 5. البروفايل الكامل (مع حساب العمر من birth_date)
     ////////////////////////////////////////////////////////////
     static async getFullProfile(candidateId) {
         const query = `
             SELECT 
-                c.*,
+                c.candidate_id,
                 cr.full_name,
-                cr.governorate,
-                cr.administrative_unit,
-                cr.gender,
-                cr.age,
-                cr.degree
+                cr.degree,
+                cr.governorate AS government,
+                DATE_PART('year', AGE(CURRENT_DATE, cr.birth_date))::INT AS age, -- ✅ حساب العمر هنا
+                c.short_bio,
+                c.personal_photos_url,
+                c.election_symbol_url
             FROM candidates c
-            LEFT JOIN civil_registry cr
+            JOIN civil_registry cr
               ON TRIM(c.national_id) = TRIM(cr.national_id)
             WHERE c.candidate_id = $1
             LIMIT 1
