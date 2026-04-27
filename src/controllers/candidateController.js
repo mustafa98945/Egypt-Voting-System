@@ -216,6 +216,9 @@ exports.listCandidates = async (req, res) => {
 ////////////////////////////////////////////////////////////
 // ✅ PROFILE (Edit Profile Screen)
 ////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+// ✅ CANDIDATE PROFILE
+////////////////////////////////////////////////////////////
 exports.getCandidateProfile = async (req, res) => {
     try {
 
@@ -245,7 +248,7 @@ exports.getCandidateProfile = async (req, res) => {
     } catch (err) {
         res.status(500).json({
             success: false,
-            message: err.message
+            message: "Error loading profile"
         });
     }
 };
