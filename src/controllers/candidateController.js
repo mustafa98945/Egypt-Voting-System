@@ -177,19 +177,20 @@ exports.listCandidates = async (req, res) => {
         if (!userUnit) {
             return res.status(400).json({
                 success: false,
-                message: "الوحدة الإدارية غير موجودة في التوكن"
+                message: "الوحدة الإدارية غير موجودة"
             });
         }
 
         const query = `
             SELECT 
                 c.candidate_id,
-                cr.full_name,
-                cr.governorate,
-                cr.administrative_unit,
-                c.candidate_type,
-                c.personal_photos_url,
-                c.election_symbol_url
+                cr.full_name AS name,
+                DATE_PART('year', AGE(CURRENT_DATE, cr.birth_date))::INT AS age,
+                cr.degree,
+                cr.governorate AS location,
+                c.short_bio,
+                c.personal_photos_url AS personal_photo,
+                c.election_symbol_url AS symbol
             FROM candidates c
             JOIN civil_registry cr
               ON TRIM(c.national_id) = TRIM(cr.national_id)
@@ -201,7 +202,6 @@ exports.listCandidates = async (req, res) => {
 
         res.json({
             success: true,
-            administrative_unit: userUnit,
             count: rows.length,
             data: rows
         });
