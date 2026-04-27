@@ -13,7 +13,8 @@ class Voter {
                 username,
                 address,
                 governorate,
-                administrative_unit
+                administrative_unit,
+                birth_date
             FROM civil_registry
             WHERE TRIM(national_id) = TRIM($1)
               AND birth_date = $2::date
@@ -61,39 +62,21 @@ class Voter {
     }
 
     ////////////////////////////////////////////////////////////
-    // ✅ 4. البحث بالرقم القومي (مع administrative_unit)
-    ////////////////////////////////////////////////////////////
-    static async findByNationalId(nationalId) {
-        const query = `
-            SELECT 
-                v.*,
-                cr.full_name,
-                cr.username,
-                cr.address,
-                cr.governorate,
-                cr.administrative_unit
-            FROM voters v
-            JOIN civil_registry cr
-              ON TRIM(v.national_id) = TRIM(cr.national_id)
-            WHERE TRIM(v.national_id) = TRIM($1)
-            LIMIT 1
-        `;
-        const { rows } = await pool.query(query, [nationalId]);
-        return rows[0];
-    }
-
-    ////////////////////////////////////////////////////////////
-    // ✅ 5. البحث بالبريد الإلكتروني
+    // ✅ 4. البحث بالبريد الإلكتروني
     ////////////////////////////////////////////////////////////
     static async findByEmail(email) {
         const query = `
             SELECT 
-                v.*,
+                v.voter_id,
+                v.national_id,
+                v.email,
+                v.password,
+                v.party_card_url,
                 cr.full_name,
-                cr.username,
                 cr.address,
                 cr.governorate,
-                cr.administrative_unit
+                cr.administrative_unit,
+                cr.birth_date
             FROM voters v
             JOIN civil_registry cr
               ON TRIM(v.national_id) = TRIM(cr.national_id)
@@ -105,29 +88,31 @@ class Voter {
     }
 
     ////////////////////////////////////////////////////////////
-    // ✅ 6. جلب بيانات الكارت
+    // ✅ 5. Profile Data
     ////////////////////////////////////////////////////////////
-    static async findByIdentifier(voterId) {
-        const query = `
-            SELECT 
-                v.*,
-                cr.full_name,
-                cr.username,
-                cr.address,
-                cr.governorate,
-                cr.administrative_unit
-            FROM voters v
-            JOIN civil_registry cr
-              ON TRIM(v.national_id) = TRIM(cr.national_id)
-            WHERE v.voter_id = $1
-            LIMIT 1
-        `;
-        const { rows } = await pool.query(query, [voterId]);
-        return rows[0];
-    }
+    static async findProfileById(voterId) {
+    const query = `
+        SELECT 
+            v.voter_id,
+            v.email,
+            v.party_card_url,
+            cr.full_name,
+            cr.address,
+            cr.birth_date,
+            cr.governorate,
+            cr.administrative_unit
+        FROM voters v
+        JOIN civil_registry cr
+          ON TRIM(v.national_id) = TRIM(cr.national_id)
+        WHERE v.voter_id = $1
+        LIMIT 1
+    `;
+    const { rows } = await pool.query(query, [voterId]);
+    return rows[0];
+}
 
     ////////////////////////////////////////////////////////////
-    // ✅ 7. تحديث حالة التصويت
+    // ✅ 6. تحديث حالة التصويت
     ////////////////////////////////////////////////////////////
     static async markAsVoted(voterId) {
         const query = `

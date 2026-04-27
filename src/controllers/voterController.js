@@ -3,7 +3,9 @@ const jwt = require('jsonwebtoken');
 const sharp = require('sharp');
 const { uploadToSupabase } = require('../utils/supabaseHelper');
 const Voter = require('../models/voterModel');
+
 console.log("✅ VoterController Loaded Successfully");
+
 ////////////////////////////////////////////////////////////
 // ✅ رفع الصور
 ////////////////////////////////////////////////////////////
@@ -23,7 +25,7 @@ const processBase64AndUpload = async (base64String, fileName, folder = 'voters_c
         return await uploadToSupabase(optimized, fileName, folder);
 
     } catch (error) {
-        console.error(error.message);
+        console.error("Image upload error:", error.message);
         return null;
     }
 };
@@ -135,7 +137,6 @@ exports.login = async (req, res) => {
             });
         }
 
-        // ✅ مهم جداً
         const token = jwt.sign(
             {
                 id: voter.voter_id,
@@ -164,25 +165,37 @@ exports.login = async (req, res) => {
 };
 
 ////////////////////////////////////////////////////////////
-// ✅ VOTER CARD .
+// ✅ PROFILE (Edit Profile Screen)
 ////////////////////////////////////////////////////////////
-exports.getVoterCard = async (req, res) => {
+exports.getVoterProfile = async (req, res) => {
     try {
-        const voter = await Voter.findByIdentifier(req.user.id);
+        const voter = await Voter.findProfileById(req.user.id);
 
         if (!voter) {
             return res.status(404).json({
                 success: false,
-                message: "غير موجود"
+                message: "Voter not found"
             });
         }
 
         res.json({
             success: true,
-            data: voter
+            data: {
+                name: voter.full_name,
+                email: voter.email,
+                phone_number: voter.phone_number || null,
+                date_of_birth: voter.birth_date,
+                address: voter.address,
+                government: voter.governorate,
+                administrative_unit: voter.administrative_unit,
+                profile_photo: voter.party_card_url
+            }
         });
 
     } catch (err) {
-        res.status(500).json({ success: false, message: err.message });
+        res.status(500).json({
+            success: false,
+            message: "Error loading profile"
+        });
     }
 };

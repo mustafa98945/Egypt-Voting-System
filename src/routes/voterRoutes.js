@@ -3,16 +3,16 @@ const router = express.Router();
 const voterController = require('../controllers/voterController');
 const auth = require('../middleware/authMiddleware');
 
-// الشاشة الأولى - التحقق والـ Auto-fill
+// ✅ الشاشة الأولى - التحقق
 router.post('/verify', voterController.verifyBeforeRegister);
 
-// الشاشة التانية - إتمام التسجيل
+// ✅ إتمام التسجيل
 router.post('/register', voterController.registerVoter);
 
-// تسجيل الدخول
+// ✅ تسجيل الدخول
 router.post('/login', voterController.login);
 
-// البروفايل (محمي بالـ Auth)
-router.get('/profile', auth, voterController.getVoterCard);
+// ✅ Edit Profile (بيانات البروفايل)
+router.get('/profile', auth, voterController.getVoterProfile);
 
 module.exports = router;

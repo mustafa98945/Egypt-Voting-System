@@ -10,8 +10,8 @@ class Candidate {
             SELECT *
             FROM civil_registry 
             WHERE TRIM(national_id) = TRIM($1)
-              AND birth_date = $2
-              AND expiry_date = $3
+              AND birth_date = $2::date
+              AND expiry_date = $3::date
             LIMIT 1
         `;
         const { rows } = await pool.query(query, [nationalId, birthDate, expiryDate]);
@@ -82,7 +82,6 @@ class Candidate {
             WHERE TRIM(c.national_id) = TRIM($1)
             LIMIT 1
         `;
-
         const { rows } = await pool.query(query, [nationalId]);
         return rows[0];
     }
@@ -103,13 +102,37 @@ class Candidate {
             WHERE c.email = $1
             LIMIT 1
         `;
-
         const { rows } = await pool.query(query, [email]);
         return rows[0];
     }
 
     ////////////////////////////////////////////////////////////
-    // ✅ 5. البروفايل الكامل (مع حساب العمر من birth_date)
+    // ✅ 5. Profile Data (Edit Profile Screen)
+    ////////////////////////////////////////////////////////////
+    static async findProfileById(candidateId) {
+        const query = `
+            SELECT 
+                c.candidate_id,
+                c.email,
+                c.phone_number,
+                c.personal_photos_url,
+                cr.full_name,
+                cr.birth_date,
+                cr.address,
+                cr.governorate,
+                cr.administrative_unit
+            FROM candidates c
+            JOIN civil_registry cr
+              ON TRIM(c.national_id) = TRIM(cr.national_id)
+            WHERE c.candidate_id = $1
+            LIMIT 1
+        `;
+        const { rows } = await pool.query(query, [candidateId]);
+        return rows[0];
+    }
+
+    ////////////////////////////////////////////////////////////
+    // ✅ 6. Public Profile (Card Screen - مع حساب العمر)
     ////////////////////////////////////////////////////////////
     static async getFullProfile(candidateId) {
         const query = `
@@ -118,23 +141,23 @@ class Candidate {
                 cr.full_name,
                 cr.degree,
                 cr.governorate AS government,
-                DATE_PART('year', AGE(CURRENT_DATE, cr.birth_date))::INT AS age, -- ✅ حساب العمر هنا
+                cr.administrative_unit,
+                DATE_PART('year', AGE(CURRENT_DATE, cr.birth_date))::INT AS age,
                 c.short_bio,
-                c.personal_photos_url,
-                c.election_symbol_url
+                c.personal_photos_url AS personal_photo,
+                c.election_symbol_url AS symbol
             FROM candidates c
             JOIN civil_registry cr
               ON TRIM(c.national_id) = TRIM(cr.national_id)
             WHERE c.candidate_id = $1
             LIMIT 1
         `;
-
         const { rows } = await pool.query(query, [candidateId]);
         return rows[0];
     }
 
     ////////////////////////////////////////////////////////////
-    // ✅ 6. إجمالي الأصوات
+    // ✅ 7. إجمالي الأصوات
     ////////////////////////////////////////////////////////////
     static async getCandidateVotes(candidateId) {
         const query = `
@@ -142,7 +165,6 @@ class Candidate {
             FROM votes
             WHERE candidate_id = $1
         `;
-
         const { rows } = await pool.query(query, [candidateId]);
         return rows[0]?.total_votes || 0;
     }

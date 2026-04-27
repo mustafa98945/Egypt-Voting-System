@@ -1,21 +1,27 @@
 const express = require('express');
 const router = express.Router();
 const candidateController = require('../controllers/candidateController');
-const auth = require('../middleware/authMiddleware'); // ✅ لازم تضيف ده
+const auth = require('../middleware/authMiddleware');
 
-// التحقق
+// ✅ التحقق الأولي
 router.post('/verify', candidateController.verifyBeforeRegister);
 
-// تسجيل
+// ✅ تسجيل مرشح
 router.post('/register', candidateController.registerCandidate);
 
-// تسجيل دخول
+// ✅ تسجيل دخول
 router.post('/loginCandidate', candidateController.loginCandidate);
 
-// ✅ لازم تضيف auth هنا
+// ✅ قائمة المرشحين (فلترة حسب administrative_unit)
 router.get('/list', auth, candidateController.listCandidates);
 
-router.get('/profile/:id', auth, candidateController.getCandidateProfile);
+// ✅ Profile الشخصي (Edit Profile Screen)
+router.get('/profile', auth, candidateController.getCandidateProfile);
+
+// ✅ Public Profile لعرض مرشح معين (مثلاً عند الضغط عليه)
+router.get('/public-profile/:id', auth, candidateController.getFullPublicProfile);
+
+// ✅ عدد الأصوات
 router.get('/votes/:id', auth, candidateController.getCandidateVotes);
 
 module.exports = router;

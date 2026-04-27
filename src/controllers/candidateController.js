@@ -15,19 +15,13 @@ const processBase64AndUpload = async (base64String, fileName, folder = 'candidat
         const base64Data = base64String.split(';base64,').pop();
         const buffer = Buffer.from(base64Data, 'base64');
 
-        if (buffer.length === 0) return null;
+        const optimized = await sharp(buffer)
+            .rotate()
+            .resize({ width: 1000 })
+            .jpeg({ quality: 70 })
+            .toBuffer();
 
-        try {
-            const optimized = await sharp(buffer)
-                .rotate()
-                .resize({ width: 1000, withoutEnlargement: true })
-                .jpeg({ quality: 70 })
-                .toBuffer();
-
-            return await uploadToSupabase(optimized, fileName, folder);
-        } catch {
-            return await uploadToSupabase(buffer, fileName, folder);
-        }
+        return await uploadToSupabase(optimized, fileName, folder);
 
     } catch (error) {
         console.error(error.message);
@@ -36,11 +30,11 @@ const processBase64AndUpload = async (base64String, fileName, folder = 'candidat
 };
 
 ////////////////////////////////////////////////////////////
-// ✅ التحقق الأولي
+// ✅ VERIFY
 ////////////////////////////////////////////////////////////
 exports.verifyBeforeRegister = async (req, res) => {
     try {
-        const { national_id, birth_date, expiry_date, email } = req.body;
+        const { national_id, birth_date, expiry_date } = req.body;
 
         const citizen = await Candidate.verifyRegistry(
             national_id,
@@ -70,7 +64,7 @@ exports.verifyBeforeRegister = async (req, res) => {
 };
 
 ////////////////////////////////////////////////////////////
-// ✅ تسجيل مرشح
+// ✅ REGISTER
 ////////////////////////////////////////////////////////////
 exports.registerCandidate = async (req, res) => {
     try {
@@ -115,7 +109,7 @@ exports.registerCandidate = async (req, res) => {
 };
 
 ////////////////////////////////////////////////////////////
-// ✅ تسجيل الدخول
+// ✅ LOGIN
 ////////////////////////////////////////////////////////////
 exports.loginCandidate = async (req, res) => {
     try {
@@ -139,7 +133,6 @@ exports.loginCandidate = async (req, res) => {
             });
         }
 
-        // ✅ مهم جداً: نحط administrative_unit في التوكن
         const token = jwt.sign(
             {
                 id: candidate.candidate_id,
@@ -167,7 +160,7 @@ exports.loginCandidate = async (req, res) => {
 };
 
 ////////////////////////////////////////////////////////////
-// ✅ قائمة المرشحين (فلترة حسب administrative_unit فقط)
+// ✅ LIST (مع حساب العمر)
 ////////////////////////////////////////////////////////////
 exports.listCandidates = async (req, res) => {
     try {
@@ -187,7 +180,7 @@ exports.listCandidates = async (req, res) => {
                 cr.full_name AS name,
                 DATE_PART('year', AGE(CURRENT_DATE, cr.birth_date))::INT AS age,
                 cr.degree,
-                cr.governorate,
+                cr.governorate AS government,
                 c.short_bio,
                 c.personal_photos_url AS personal_photo,
                 c.election_symbol_url AS symbol
@@ -216,31 +209,44 @@ exports.listCandidates = async (req, res) => {
 };
 
 ////////////////////////////////////////////////////////////
-// ✅ بروفايل مرشح
+// ✅ PROFILE (Edit Profile Screen)
 ////////////////////////////////////////////////////////////
 exports.getCandidateProfile = async (req, res) => {
     try {
-        const profile = await Candidate.getFullProfile(req.params.id);
 
-        if (!profile) {
+        const candidate = await Candidate.findProfileById(req.user.id);
+
+        if (!candidate) {
             return res.status(404).json({
                 success: false,
-                message: "غير موجود"
+                message: "Candidate not found"
             });
         }
 
         res.json({
             success: true,
-            data: profile
+            data: {
+                name: candidate.full_name,
+                email: candidate.email,
+                phone_number: candidate.phone_number,
+                date_of_birth: candidate.birth_date,
+                address: candidate.address,
+                government: candidate.governorate,
+                administrative_unit: candidate.administrative_unit,
+                profile_photo: candidate.personal_photos_url
+            }
         });
 
     } catch (err) {
-        res.status(500).json({ success: false, message: err.message });
+        res.status(500).json({
+            success: false,
+            message: "Error loading profile"
+        });
     }
 };
 
 ////////////////////////////////////////////////////////////
-// ✅ عدد الأصوات
+// ✅ VOTES
 ////////////////////////////////////////////////////////////
 exports.getCandidateVotes = async (req, res) => {
     try {
