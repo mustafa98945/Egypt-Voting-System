@@ -187,7 +187,7 @@ exports.listCandidates = async (req, res) => {
                 cr.full_name AS name,
                 DATE_PART('year', AGE(CURRENT_DATE, cr.birth_date))::INT AS age,
                 cr.degree,
-                cr.governorate AS location,
+                cr.governorate,
                 c.short_bio,
                 c.personal_photos_url AS personal_photo,
                 c.election_symbol_url AS symbol
