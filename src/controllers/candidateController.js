@@ -85,6 +85,32 @@ exports.registerCandidate = async (req, res) => {
 
         const hashedPassword = await bcrypt.hash(data.password, 10);
 
+        // ✅ رفع الصور على Supabase الأول
+        const uploadFile = async (fileData, fieldName, folder) => {
+            if (!fileData) return null;
+            // لو URL جاهز خده زي ما هو
+            if (typeof fileData === 'string' && fileData.startsWith('http')) {
+                return fileData;
+            }
+            // لو base64 ارفعه
+            const fileName = `${fieldName}_${data.national_id}_${Date.now()}.jpg`;
+            return await processBase64AndUpload(fileData, fileName, folder);
+        };
+
+        const [
+            election_symbol_url,
+            personal_photos_url,
+            financial_disclosure_url,
+            fitness_health_url,
+            deposit_receipt_url
+        ] = await Promise.all([
+            uploadFile(data.election_symbol_url, 'election_symbol', 'candidates/election_symbols'),
+            uploadFile(data.personal_photos_url, 'personal_photo', 'candidates/personal_photos'),
+            uploadFile(data.financial_disclosure_url, 'financial', 'candidates/financial_disclosures'),
+            uploadFile(data.fitness_health_url, 'fitness', 'candidates/fitness_health'),
+            uploadFile(data.deposit_receipt_url, 'deposit', 'candidates/deposit_receipts')
+        ]);
+
         const newCandidate = await Candidate.create({
             national_id: data.national_id,
             birth_date: data.birth_date,
@@ -95,11 +121,11 @@ exports.registerCandidate = async (req, res) => {
             occupation: data.occupation,
             candidate_type: data.candidate_type,
             short_bio: data.short_bio,
-            election_symbol_url: data.election_symbol_url,
-            personal_photos_url: data.personal_photos_url,
-            financial_disclosure_url: data.financial_disclosure_url,
-            fitness_health_url: data.fitness_health_url,
-            deposit_receipt_url: data.deposit_receipt_url
+            election_symbol_url,       // ✅ URL بعد الرفع
+            personal_photos_url,       // ✅ URL بعد الرفع
+            financial_disclosure_url,  // ✅ URL بعد الرفع
+            fitness_health_url,        // ✅ URL بعد الرفع
+            deposit_receipt_url        // ✅ URL بعد الرفع
         });
 
         res.status(201).json({
@@ -109,10 +135,10 @@ exports.registerCandidate = async (req, res) => {
         });
 
     } catch (err) {
+        console.error("Register Error:", err);
         res.status(500).json({ success: false, message: err.message });
     }
 };
-
 ////////////////////////////////////////////////////////////
 // ✅ LOGIN
 ////////////////////////////////////////////////////////////
