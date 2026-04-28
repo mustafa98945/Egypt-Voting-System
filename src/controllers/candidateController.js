@@ -148,7 +148,7 @@ exports.loginCandidate = async (req, res) => {
         let candidate;
 
         // طريقة 1: Face Recognition بالـ national_id
-        if (isFaceAuthenticated && national_id) {
+        if (national_id) {
             candidate = await Candidate.findByNationalId(national_id);
             if (!candidate) return res.status(404).json({
                 success: false,
