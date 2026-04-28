@@ -2,9 +2,7 @@ const pool = require('../config/db');
 
 class Voter {
 
-    ////////////////////////////////////////////////////////////
-    // ✅ 1. التحقق من السجل المدني
-    ////////////////////////////////////////////////////////////
+    // 1. التحقق من السجل المدني
     static async verifyInRegistry(nationalId, birthDate, expiryDate) {
         const query = `
             SELECT 
@@ -25,9 +23,7 @@ class Voter {
         return rows[0];
     }
 
-    ////////////////////////////////////////////////////////////
-    // ✅ 2. التحقق من التكرار
-    ////////////////////////////////////////////////////////////
+    // 2. التحقق من التكرار
     static async checkDuplicate(email, nationalId) {
         const query = `
             SELECT 1
@@ -40,12 +36,9 @@ class Voter {
         return rows[0];
     }
 
-    ////////////////////////////////////////////////////////////
-    // ✅ 3. إنشاء ناخب
-    ////////////////////////////////////////////////////////////
+    // 3. إنشاء ناخب
     static async create(voterData) {
         const { national_id, email, password, party_card_url } = voterData;
-
         const query = `
             INSERT INTO voters (national_id, email, password, party_card_url)
             VALUES ($1, $2, $3, $4)
@@ -57,13 +50,10 @@ class Voter {
             password,
             party_card_url || null
         ]);
-
         return rows[0];
     }
 
-    ////////////////////////////////////////////////////////////
-    // ✅ 4. البحث بالبريد الإلكتروني
-    ////////////////////////////////////////////////////////////
+    // 4. البحث بالبريد الإلكتروني
     static async findByEmail(email) {
         const query = `
             SELECT 
@@ -87,33 +77,53 @@ class Voter {
         return rows[0];
     }
 
-    ////////////////////////////////////////////////////////////
-    // ✅ 5. Profile Data
-    ////////////////////////////////////////////////////////////
-    static async findProfileById(voterId) {
-    const query = `
-        SELECT 
-            v.voter_id,
-            v.email,
-            v.party_card_url,
-            cr.full_name,
-            cr.address,
-            cr.birth_date,
-            cr.governorate,
-            cr.administrative_unit
-        FROM voters v
-        JOIN civil_registry cr
-          ON TRIM(v.national_id) = TRIM(cr.national_id)
-        WHERE v.voter_id = $1
-        LIMIT 1
-    `;
-    const { rows } = await pool.query(query, [voterId]);
-    return rows[0];
-}
+    // 5. البحث بالرقم القومي ✅ جديد
+    static async findByNationalId(nationalId) {
+        const query = `
+            SELECT 
+                v.voter_id,
+                v.national_id,
+                v.email,
+                v.password,
+                v.party_card_url,
+                cr.full_name,
+                cr.address,
+                cr.governorate,
+                cr.administrative_unit,
+                cr.birth_date
+            FROM voters v
+            JOIN civil_registry cr
+              ON TRIM(v.national_id) = TRIM(cr.national_id)
+            WHERE TRIM(v.national_id) = TRIM($1)
+            LIMIT 1
+        `;
+        const { rows } = await pool.query(query, [nationalId]);
+        return rows[0];
+    }
 
-    ////////////////////////////////////////////////////////////
-    // ✅ 6. تحديث حالة التصويت
-    ////////////////////////////////////////////////////////////
+    // 6. Profile Data
+    static async findProfileById(voterId) {
+        const query = `
+            SELECT 
+                v.voter_id,
+                v.email,
+                v.party_card_url,
+                cr.full_name,
+                cr.address,
+                cr.birth_date,
+                cr.governorate,
+                cr.administrative_unit
+            FROM voters v
+            JOIN civil_registry cr
+              ON TRIM(v.national_id) = TRIM(cr.national_id)
+            WHERE v.voter_id = $1
+            LIMIT 1
+        `;
+        const { rows } = await pool.query(query, [voterId]);
+        return rows[0];
+    }
+
+    // 7. تحديث حالة التصويت
     static async markAsVoted(voterId) {
         const query = `
             UPDATE voters

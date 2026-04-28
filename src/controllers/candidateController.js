@@ -144,23 +144,35 @@ exports.registerCandidate = async (req, res) => {
 ////////////////////////////////////////////////////////////
 exports.loginCandidate = async (req, res) => {
     try {
-        const { email, password } = req.body;
+        const { email, password, national_id, isFaceAuthenticated } = req.body;
+        let candidate;
 
-        const candidate = await Candidate.findByEmail(email);
-
-        if (!candidate) {
-            return res.status(404).json({
+        // طريقة 1: Face Recognition بالـ national_id
+        if (isFaceAuthenticated && national_id) {
+            candidate = await Candidate.findByNationalId(national_id);
+            if (!candidate) return res.status(404).json({
                 success: false,
                 message: "الحساب غير موجود"
             });
         }
-
-        const isMatch = await bcrypt.compare(password, candidate.password);
-
-        if (!isMatch) {
-            return res.status(401).json({
+        // طريقة 2: email + password
+        else if (email && password) {
+            candidate = await Candidate.findByEmail(email);
+            if (!candidate) return res.status(404).json({
+                success: false,
+                message: "الحساب غير موجود"
+            });
+            const isMatch = await bcrypt.compare(password, candidate.password);
+            if (!isMatch) return res.status(401).json({
                 success: false,
                 message: "كلمة المرور غير صحيحة"
+            });
+        }
+        // مفيش بيانات
+        else {
+            return res.status(400).json({
+                success: false,
+                message: "يرجى إدخال البيانات"
             });
         }
 
@@ -181,6 +193,7 @@ exports.loginCandidate = async (req, res) => {
             user_data: {
                 id: candidate.candidate_id,
                 role: 'candidate',
+                full_name: candidate.full_name,
                 administrative_unit: candidate.administrative_unit
             }
         });

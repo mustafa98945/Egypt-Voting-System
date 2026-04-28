@@ -117,23 +117,34 @@ exports.registerVoter = async (req, res) => {
 ////////////////////////////////////////////////////////////
 exports.login = async (req, res) => {
     try {
-        const { email, password } = req.body;
+        const { email, password, national_id, isFaceAuthenticated } = req.body;
+        let voter;
 
-        const voter = await Voter.findByEmail(email);
-
-        if (!voter) {
-            return res.status(404).json({
+        // طريقة 1: Face Recognition بالـ national_id
+        if (isFaceAuthenticated && national_id) {
+            voter = await Voter.findByNationalId(national_id);
+            if (!voter) return res.status(404).json({
                 success: false,
                 message: "الحساب غير موجود"
             });
         }
-
-        const isMatch = await bcrypt.compare(password, voter.password);
-
-        if (!isMatch) {
-            return res.status(401).json({
+        // طريقة 2: email + password
+        else if (email && password) {
+            voter = await Voter.findByEmail(email);
+            if (!voter) return res.status(404).json({
+                success: false,
+                message: "الحساب غير موجود"
+            });
+            const isMatch = await bcrypt.compare(password, voter.password);
+            if (!isMatch) return res.status(401).json({
                 success: false,
                 message: "كلمة المرور غير صحيحة"
+            });
+        }
+        else {
+            return res.status(400).json({
+                success: false,
+                message: "يرجى إدخال بيانات الدخول"
             });
         }
 

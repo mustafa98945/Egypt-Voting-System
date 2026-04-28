@@ -2,9 +2,7 @@ const pool = require('../config/db');
 
 class Candidate {
 
-    ////////////////////////////////////////////////////////////
-    // ✅ 1. التحقق من السجل المدني
-    ////////////////////////////////////////////////////////////
+    // 1. التحقق من السجل المدني
     static async verifyRegistry(nationalId, birthDate, expiryDate) {
         const query = `
             SELECT *
@@ -18,9 +16,7 @@ class Candidate {
         return rows[0];
     }
 
-    ////////////////////////////////////////////////////////////
-    // ✅ 2. إنشاء مرشح
-    ////////////////////////////////////////////////////////////
+    // 2. إنشاء مرشح
     static async create(data) {
         const query = `
             INSERT INTO candidates (
@@ -44,7 +40,6 @@ class Candidate {
             )
             RETURNING *
         `;
-
         const values = [
             data.national_id,
             data.birth_date,
@@ -61,14 +56,11 @@ class Candidate {
             data.fitness_health_url,
             data.deposit_receipt_url
         ];
-
         const { rows } = await pool.query(query, values);
         return rows[0];
     }
 
-    ////////////////////////////////////////////////////////////
-    // ✅ 3. البحث بالرقم القومي
-    ////////////////////////////////////////////////////////////
+    // 3. البحث بالرقم القومي
     static async findByNationalId(nationalId) {
         const query = `
             SELECT 
@@ -86,9 +78,7 @@ class Candidate {
         return rows[0];
     }
 
-    ////////////////////////////////////////////////////////////
-    // ✅ 4. البحث بالبريد الإلكتروني
-    ////////////////////////////////////////////////////////////
+    // 4. البحث بالبريد الإلكتروني
     static async findByEmail(email) {
         const query = `
             SELECT 
@@ -106,9 +96,7 @@ class Candidate {
         return rows[0];
     }
 
-    ////////////////////////////////////////////////////////////
-    // ✅ 5. Profile Data (Edit Profile Screen)
-    ////////////////////////////////////////////////////////////
+    // 5. Profile Data
     static async findProfileById(candidateId) {
         const query = `
             SELECT 
@@ -131,9 +119,7 @@ class Candidate {
         return rows[0];
     }
 
-    ////////////////////////////////////////////////////////////
-    // ✅ 6. Public Profile (Card Screen - مع حساب العمر)
-    ////////////////////////////////////////////////////////////
+    // 6. Public Profile
     static async getFullProfile(candidateId) {
         const query = `
             SELECT 
@@ -156,9 +142,7 @@ class Candidate {
         return rows[0];
     }
 
-    ////////////////////////////////////////////////////////////
-    // ✅ 7. إجمالي الأصوات
-    ////////////////////////////////////////////////////////////
+    // 7. إجمالي الأصوات
     static async getCandidateVotes(candidateId) {
         const query = `
             SELECT COUNT(*)::INT AS total_votes
