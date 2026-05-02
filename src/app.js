@@ -66,7 +66,7 @@ app.use((err, req, res, next) => {
     });
 });
 
-// 6. تشغيل السيرفر
+// غير الـ console.log دي
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
     console.log(`-----------------------------------------`);
@@ -75,6 +75,8 @@ app.listen(PORT, () => {
     console.log(`   ✅ الناخبين:     /api/voters`);
     console.log(`   ✅ المرشحين:     /api/candidates`);
     console.log(`   ✅ التصويت:      /api/vote`);
-    console.log(`   ✅ الإحصائيات:    /api/stats`);
+    console.log(`   ✅ الإحصائيات:   /api/stats`);
+    console.log(`   ✅ الأدمن:       /api/admin`);        // ← جديد
+    console.log(`   ✅ الانتخابات:   /api/election`);    // ← جديد
     console.log(`-----------------------------------------`);
 });
