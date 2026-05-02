@@ -3,7 +3,7 @@ const jwt = require('jsonwebtoken');
 const sharp = require('sharp');
 const { uploadToSupabase } = require('../utils/supabaseHelper');
 const Candidate = require('../models/candidateModel');
-const pool = require('../config/db');
+const { pool } = require('../config/db');
 
 ////////////////////////////////////////////////////////////
 // ✅ رفع الصور (محتفظ بيه كما هو)

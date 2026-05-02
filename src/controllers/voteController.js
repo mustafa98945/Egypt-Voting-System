@@ -1,5 +1,5 @@
 const Vote = require('../models/voteModel');
-const pool = require('../config/db');
+const { pool } = require('../config/db');
 
 // --- 1. تنفيذ التصويت ---
 exports.castVote = async (req, res) => {
