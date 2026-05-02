@@ -1,20 +1,27 @@
 const { Pool } = require('pg');
 require('dotenv').config();
+
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: { rejectUnauthorized: false },
-  max: 1,
-  idleTimeoutMillis: 5000,
-  connectionTimeoutMillis: 1000,
+  max: 5,
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 10000,
   keepAlive: true
 });
 
-pool.on('connect', () => {
-  console.log('✅ Connected to Supabase via Pooler');
-});
+async function queryWithRetry(text, params, retries = 5) {
+  for (let i = 0; i < retries; i++) {
+    try {
+      return await pool.query(text, params);
+    } catch (err) {
+      console.log(`DB attempt ${i + 1} failed... retrying`);
+      
+      if (i === retries - 1) throw err;
 
-pool.on('error', (err) => {
-  console.error('🔥 DB Error:', err);
-});
+      await new Promise(res => setTimeout(res, 3000)); // يستنى 3 ثواني
+    }
+  }
+}
 
-module.exports = pool;
+module.exports = { pool, queryWithRetry };
