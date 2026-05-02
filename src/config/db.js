@@ -1,22 +1,25 @@
 const { Pool } = require('pg');
-require('dotenv').config(); 
+require('dotenv').config();
 
 const pool = new Pool({
-  // بيقرأ الرابط من ملف الـ .env اللي عملناه
   connectionString: process.env.DATABASE_URL,
   ssl: {
-    // السطر ده ضروري جداً للربط مع Supabase و Render
-    rejectUnauthorized: false 
-  }
+    rejectUnauthorized: false
+  },
+
+  // ✅ أهم تعديل
+  max: 5,                     // قلل عدد الاتصالات
+  idleTimeoutMillis: 30000,   // يقفل الاتصال لو مش مستخدم
+  connectionTimeoutMillis: 2000
 });
 
-// اختبار بسيط للتأكد من الاتصال أول ما السيرفر يقوم
-pool.connect((err, client, release) => {
-  if (err) {
-    return console.error('خطأ في الاتصال بقاعدة البيانات:', err.stack);
-  }
-  console.log('تم الاتصال بـ Supabase بنجاح! 🚀');
-  release();
+// ✅ اختبار الاتصال بطريقة آمنة
+pool.on('connect', () => {
+  console.log('✅ Database connected successfully');
+});
+
+pool.on('error', (err) => {
+  console.error('Unexpected DB error', err);
 });
 
 module.exports = pool;
