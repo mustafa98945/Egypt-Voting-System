@@ -7,6 +7,7 @@ const voterRoutes = require('./routes/voterRoutes');
 const candidateRoutes = require('./routes/candidateRoutes');
 const voteRoutes = require('./routes/voteRoutes'); 
 const statsRoutes = require('./routes/statsRoutes');
+const adminRoutes = require('./routes/adminRoutes');
 
 const app = express();
 
@@ -36,6 +37,7 @@ app.use('/api/voters', voterRoutes);
 app.use('/api/candidates', candidateRoutes); 
 app.use('/api/vote', voteRoutes); 
 app.use('/api/stats', statsRoutes);
+app.use('/api/admin', adminRoutes);
 
 // 4. معالجة الروابط غير الموجودة (404 Not Found)
 app.use((req, res) => {
