@@ -15,5 +15,8 @@ router.put('/edit/:id', adminMiddleware, adminController.editAdmin);
 router.get('/candidates/pending', adminMiddleware, adminController.getPendingCandidates);
 router.get('/candidates/:id', adminMiddleware, adminController.getCandidateDetails);
 router.put('/candidates/:id/decision', adminMiddleware, adminController.decideCandidateApproval);
+router.get('/candidates/accepted', adminMiddleware, adminController.getAcceptedCandidates);
+router.delete('/candidates/delete/:id', adminMiddleware, adminController.deleteCandidate);
+router.get('/dashboard/stats', adminMiddleware, adminController.getDashboardStats);
 
 module.exports = router;

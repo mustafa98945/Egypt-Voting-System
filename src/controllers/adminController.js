@@ -388,3 +388,76 @@ exports.decideCandidateApproval = async (req, res) => {
         res.status(500).json({ success: false, message: err.message });
     }
 };
+
+// في adminController.js أضف:
+exports.getAcceptedCandidates = async (req, res) => {
+    try {
+        const { rows } = await queryWithRetry(
+            `SELECT 
+                c.candidate_id,
+                c.candidate_type,
+                c.personal_photos_url,
+                cr.full_name
+             FROM candidates c
+             LEFT JOIN civil_registry cr 
+               ON TRIM(c.national_id) = TRIM(cr.national_id)
+             WHERE c.is_approved = TRUE
+             ORDER BY c.created_at DESC`
+        );
+
+        res.json({
+            success: true,
+            count: rows.length,
+            data: rows
+        });
+
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+};
+
+exports.deleteCandidate = async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        await queryWithRetry(
+            'DELETE FROM candidates WHERE candidate_id = $1',
+            [id]
+        );
+
+        res.json({
+            success: true,
+            message: "تم حذف المرشح بنجاح"
+        });
+
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+};
+
+exports.getDashboardStats = async (req, res) => {
+    try {
+        const { rows } = await queryWithRetry(
+            `SELECT 
+                (SELECT COUNT(*) FROM voters) AS total_voters,
+                (SELECT COUNT(*) FROM candidates WHERE is_approved = TRUE) AS total_candidates,
+                (SELECT COUNT(*) FROM votes) AS total_voted,
+                (SELECT COUNT(*) FROM voters WHERE has_voted = TRUE) +
+                (SELECT COUNT(*) FROM candidates WHERE has_voted = TRUE) AS total_completed
+             `
+        );
+
+        res.json({
+            success: true,
+            data: {
+                voters: rows[0].total_voters,
+                candidates: rows[0].total_candidates,
+                completed: rows[0].total_completed,
+                total_votes: rows[0].total_voted
+            }
+        });
+
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+};
