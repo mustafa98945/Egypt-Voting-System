@@ -255,3 +255,136 @@ exports.editAdmin = async (req, res) => {
         res.status(500).json({ success: false, message: err.message });
     }
 };
+
+// --- جلب المرشحين المنتظرين ---
+exports.getPendingCandidates = async (req, res) => {
+    try {
+        const { rows } = await queryWithRetry(
+            `SELECT 
+                c.candidate_id,
+                c.email,
+                c.candidate_type,
+                c.personal_photos_url,
+                c.is_approved,
+                cr.full_name
+             FROM candidates c
+             LEFT JOIN civil_registry cr 
+               ON TRIM(c.national_id) = TRIM(cr.national_id)
+             WHERE c.is_approved IS NULL
+             ORDER BY c.created_at DESC`
+        );
+
+        res.json({
+            success: true,
+            count: rows.length,
+            data: rows
+        });
+
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+};
+
+// --- جلب تفاصيل مرشح كامل ---
+exports.getCandidateDetails = async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        const { rows } = await queryWithRetry(
+            `SELECT 
+                c.candidate_id,
+                c.email,
+                c.password,
+                c.phone_number,
+                c.occupation,
+                c.candidate_type,
+                c.short_bio,
+                c.election_symbol_url,
+                c.financial_disclosure_url,
+                c.personal_photos_url,
+                c.fitness_health_url,
+                c.deposit_receipt_url,
+                c.is_approved,
+                c.created_at,
+                cr.full_name,
+                cr.national_id,
+                cr.birth_date,
+                cr.username,
+                cr.governorate,
+                cr.address,
+                cr.administrative_unit,
+                cr.degree,
+                cr.age,
+                cr.gender,
+                cr.military_service_url,
+                cr.education_qualification_url,
+                cr.birth_certificate_url,
+                cr.criminal_record_url,
+                cr.national_id_front_url,
+                cr.national_id_back_url
+             FROM candidates c
+             LEFT JOIN civil_registry cr 
+               ON TRIM(c.national_id) = TRIM(cr.national_id)
+             WHERE c.candidate_id = $1`,
+            [id]
+        );
+
+        if (rows.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: "المرشح غير موجود"
+            });
+        }
+
+        res.json({
+            success: true,
+            data: rows[0]
+        });
+
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+};
+
+// --- قبول أو رفض مرشح ---
+exports.decideCandidateApproval = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { decision } = req.body;
+
+        if (!decision || !['accepted', 'refused'].includes(decision)) {
+            return res.status(400).json({
+                success: false,
+                message: "يرجى إدخال القرار: accepted أو refused"
+            });
+        }
+
+        const isApproved = decision === 'accepted';
+
+        const { rows } = await queryWithRetry(
+            `UPDATE candidates 
+             SET is_approved = $1
+             WHERE candidate_id = $2
+             RETURNING candidate_id, email, is_approved`,
+            [isApproved, id]
+        );
+
+        if (rows.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: "المرشح غير موجود"
+            });
+        }
+
+        res.json({
+            success: true,
+            message: decision === 'accepted' 
+                ? "تم قبول المرشح بنجاح" 
+                : "تم رفض المرشح",
+            data: rows[0]
+        });
+
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+};

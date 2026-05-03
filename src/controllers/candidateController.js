@@ -208,7 +208,6 @@ exports.loginCandidate = async (req, res) => {
 ////////////////////////////////////////////////////////////
 exports.listCandidates = async (req, res) => {
     try {
-
         const userUnit = req.user.administrative_unit;
 
         if (!userUnit) {
@@ -232,6 +231,7 @@ exports.listCandidates = async (req, res) => {
             JOIN civil_registry cr
               ON TRIM(c.national_id) = TRIM(cr.national_id)
             WHERE TRIM(cr.administrative_unit) = TRIM($1)
+            AND c.is_approved = TRUE
             ORDER BY c.created_at DESC
         `;
 
