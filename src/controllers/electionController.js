@@ -43,7 +43,6 @@ exports.createElection = async (req, res) => {
             });
         }
 
-        // التحقق من التواريخ
         if (new Date(start_date) >= new Date(end_date)) {
             return res.status(400).json({
                 success: false,
@@ -51,7 +50,12 @@ exports.createElection = async (req, res) => {
             });
         }
 
-        // رفع الشعار
+        // ✅ is_active بيتحسب تلقائي
+        const today = new Date();
+        const start = new Date(start_date);
+        const end = new Date(end_date);
+        const isActive = today >= start && today <= end;
+
         let logoUrl = null;
         if (logo_url) {
             const fileName = `election_logo_${Date.now()}.jpg`;
@@ -60,10 +64,14 @@ exports.createElection = async (req, res) => {
 
         const { rows } = await pool.query(
             `INSERT INTO elections 
-             (election_type, election_name, governorate, logo_url, start_date, end_date)
-             VALUES ($1, $2, $3, $4, $5, $6)
+             (election_type, election_name, governorate, logo_url, 
+              start_date, end_date, is_active)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)
              RETURNING *`,
-            [election_type, election_name, governorate, logoUrl, start_date, end_date]
+            [
+                election_type, election_name, governorate,
+                logoUrl, start_date, end_date, isActive
+            ]
         );
 
         res.status(201).json({
@@ -77,7 +85,6 @@ exports.createElection = async (req, res) => {
         res.status(500).json({ success: false, message: err.message });
     }
 };
-
 // --- 2. تعديل انتخابات ---
 exports.editElection = async (req, res) => {
     try {
@@ -110,19 +117,34 @@ exports.editElection = async (req, res) => {
             logoUrl = await processAndUpload(logo_url, fileName);
         }
 
+        // ✅ is_active بيتحدد تلقائي من التواريخ
+        const newStartDate = start_date || existing[0].start_date;
+        const newEndDate = end_date || existing[0].end_date;
+        const today = new Date();
+        const start = new Date(newStartDate);
+        const end = new Date(newEndDate);
+        const isActive = today >= start && today <= end;
+
         const { rows } = await pool.query(
             `UPDATE elections SET
                 election_type = COALESCE($1, election_type),
                 election_name = COALESCE($2, election_name),
                 governorate   = COALESCE($3, governorate),
-                logo_url      = COALESCE($4, logo_url),
+                logo_url      = $4,
                 start_date    = COALESCE($5, start_date),
-                end_date      = COALESCE($6, end_date)
-             WHERE election_id = $7
+                end_date      = COALESCE($6, end_date),
+                is_active     = $7
+             WHERE election_id = $8
              RETURNING *`,
             [
-                election_type, election_name, governorate,
-                logoUrl, start_date, end_date, id
+                election_type,
+                election_name,
+                governorate,  // ✅ مش بنستخدم COALESCE عشان نسمح بالتعديل
+                logoUrl,
+                start_date,
+                end_date,
+                isActive,     // ✅ بيتحسب تلقائي
+                id
             ]
         );
 
@@ -137,8 +159,6 @@ exports.editElection = async (req, res) => {
         res.status(500).json({ success: false, message: err.message });
     }
 };
-
-// --- 3. جلب كل الانتخابات (للـ Admin) ---
 exports.getAllElections = async (req, res) => {
     try {
         const { rows } = await pool.query(
