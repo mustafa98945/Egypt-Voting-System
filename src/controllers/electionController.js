@@ -1,4 +1,4 @@
-const { pool } = require('../config/db');
+const { pool, queryWithRetry } = require('../config/db');
 const { uploadToSupabase } = require('../utils/supabaseHelper');
 const sharp = require('sharp');
 
