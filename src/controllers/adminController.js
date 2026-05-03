@@ -211,3 +211,47 @@ exports.deleteAdmin = async (req, res) => {
         res.status(500).json({ success: false, message: err.message });
     }
 };
+
+// --- 6. Edit Admin ---
+exports.editAdmin = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { email, password } = req.body;
+
+        // التحقق من وجود الـ Admin
+        const { rows: existing } = await queryWithRetry(
+            'SELECT * FROM admins WHERE admin_id = $1',
+            [id]
+        );
+        if (existing.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: "الأدمن غير موجود"
+            });
+        }
+
+        // لو في باسورد جديد → هاشه
+        let hashedPassword = existing[0].password;
+        if (password) {
+            hashedPassword = await bcrypt.hash(password, 10);
+        }
+
+        const { rows } = await queryWithRetry(
+            `UPDATE admins 
+             SET email = COALESCE($1, email),
+                 password = $2
+             WHERE admin_id = $3
+             RETURNING admin_id, email`,
+            [email, hashedPassword, id]
+        );
+
+        res.json({
+            success: true,
+            message: "تم تعديل الأدمن بنجاح",
+            data: rows[0]
+        });
+
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+};

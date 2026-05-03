@@ -11,5 +11,6 @@ router.post('/logout', adminMiddleware, adminController.logout);
 router.post('/add', adminMiddleware, adminController.addAdmin);
 router.get('/all', adminMiddleware, adminController.getAllAdmins);
 router.delete('/delete/:id', adminMiddleware, adminController.deleteAdmin);
+router.put('/edit/:id', adminMiddleware, adminController.editAdmin);
 
 module.exports = router;
