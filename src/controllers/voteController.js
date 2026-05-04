@@ -85,34 +85,72 @@ exports.getVoteCard = async (req, res) => {
 // --- 4. نتائج الانتخابات (كل المرشحين بأصواتهم وصورهم) ---
 exports.getResults = async (req, res) => {
     try {
-        const userDistrict = req.user.electoral_district;
+        // ✅ التحقق من حالة الانتخابات الأول
+        const { rows: electionRows } = await pool.query(
+            `SELECT status FROM (
+                SELECT 
+                    CASE 
+                        WHEN CURRENT_DATE < start_date THEN 'not_started'
+                        WHEN CURRENT_DATE BETWEEN start_date AND end_date THEN 'active'
+                        WHEN CURRENT_DATE > end_date THEN 'ended'
+                    END AS status
+                FROM elections
+                WHERE is_active = TRUE
+                ORDER BY created_at DESC
+                LIMIT 1
+            ) sub`
+        );
 
-        const query = `
-            SELECT 
+        // لو مفيش انتخابات أو لسه مش خلصت
+        if (electionRows.length === 0) {
+            return res.status(403).json({
+                success: false,
+                message: "لا توجد انتخابات حالياً"
+            });
+        }
+
+        if (electionRows[0].status !== 'ended') {
+            return res.status(403).json({
+                success: false,
+                message: "النتائج ستظهر بعد انتهاء فترة التصويت"
+            });
+        }
+
+        // ✅ لو الانتخابات خلصت → ارجع النتايج
+        const userUnit = req.user.administrative_unit;
+
+        const { rows } = await pool.query(
+            `SELECT 
                 c.candidate_id,
                 cr.full_name,
                 c.personal_photos_url,
                 c.candidate_type,
                 c.election_symbol_url,
+                cr.administrative_unit,
                 COUNT(v.vote_id)::INT AS total_votes
             FROM candidates c
             LEFT JOIN civil_registry cr ON TRIM(c.national_id) = TRIM(cr.national_id)
             LEFT JOIN votes v ON c.candidate_id = v.candidate_id
-            WHERE TRIM(c.electoral_district) = TRIM($1)
+            WHERE TRIM(cr.administrative_unit) = TRIM($1)
+            AND c.is_approved = TRUE
             GROUP BY 
                 c.candidate_id, cr.full_name, c.personal_photos_url,
-                c.candidate_type, c.election_symbol_url
-            ORDER BY total_votes DESC
-        `;
-        const { rows } = await pool.query(query, [userDistrict]);
+                c.candidate_type, c.election_symbol_url, cr.administrative_unit
+            ORDER BY total_votes DESC`,
+            [userUnit]
+        );
 
         res.json({
             success: true,
-            district: userDistrict,
+            administrative_unit: userUnit,
             data: rows
         });
+
     } catch (err) {
         console.error("Results Error:", err.message);
-        res.status(500).json({ success: false, message: "خطأ في جلب النتائج" });
+        res.status(500).json({ 
+            success: false, 
+            message: "خطأ في جلب النتائج" 
+        });
     }
 };
