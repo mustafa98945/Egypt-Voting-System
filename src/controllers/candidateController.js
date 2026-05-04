@@ -154,6 +154,20 @@ exports.loginCandidate = async (req, res) => {
                 success: false,
                 message: "الحساب غير موجود"
             });
+
+            // ✅ التحقق من حالة القبول
+            if (candidate.is_approved === false) {
+                return res.status(403).json({
+                    success: false,
+                    message: "تم رفض طلب ترشحك"
+                });
+            }
+            if (candidate.is_approved === null) {
+                return res.status(403).json({
+                    success: false,
+                    message: "طلبك قيد المراجعة، يرجى الانتظار"
+                });
+            }
         }
         // طريقة 2: email + password
         else if (email && password) {
@@ -162,6 +176,21 @@ exports.loginCandidate = async (req, res) => {
                 success: false,
                 message: "الحساب غير موجود"
             });
+
+            // ✅ التحقق من حالة القبول
+            if (candidate.is_approved === false) {
+                return res.status(403).json({
+                    success: false,
+                    message: "تم رفض طلب ترشحك"
+                });
+            }
+            if (candidate.is_approved === null) {
+                return res.status(403).json({
+                    success: false,
+                    message: "طلبك قيد المراجعة، يرجى الانتظار"
+                });
+            }
+
             const isMatch = await bcrypt.compare(password, candidate.password);
             if (!isMatch) return res.status(401).json({
                 success: false,
@@ -202,7 +231,6 @@ exports.loginCandidate = async (req, res) => {
         res.status(500).json({ success: false, message: err.message });
     }
 };
-
 ////////////////////////////////////////////////////////////
 // ✅ LIST (مع حساب العمر من birth_date)
 ////////////////////////////////////////////////////////////
