@@ -245,6 +245,39 @@ exports.listCandidates = async (req, res) => {
             });
         }
 
+        // ✅ التحقق من حالة الانتخابات الأول
+        const { rows: electionRows } = await pool.query(
+            `SELECT 
+                CASE 
+                    WHEN CURRENT_DATE < start_date THEN 'not_started'
+                    WHEN CURRENT_DATE BETWEEN start_date AND end_date THEN 'active'
+                    WHEN CURRENT_DATE > end_date THEN 'ended'
+                END AS status
+             FROM elections
+             WHERE is_active = TRUE
+             ORDER BY created_at DESC
+             LIMIT 1`
+        );
+
+        // لو مفيش انتخابات
+        if (electionRows.length === 0) {
+            return res.status(403).json({
+                success: false,
+                message: "لا توجد انتخابات حالياً"
+            });
+        }
+
+        // لو الانتخابات مش active
+        if (electionRows[0].status !== 'active') {
+            return res.status(403).json({
+                success: false,
+                message: electionRows[0].status === 'not_started' 
+                    ? "الانتخابات لم تبدأ بعد"
+                    : "انتهت فترة الانتخابات"
+            });
+        }
+
+        // ✅ لو active → ارجع المرشحين
         const query = `
             SELECT 
                 c.candidate_id,
@@ -279,7 +312,6 @@ exports.listCandidates = async (req, res) => {
         });
     }
 };
-
 ////////////////////////////////////////////////////////////
 // ✅ PROFILE (Edit Profile Screen)
 ////////////////////////////////////////////////////////////
