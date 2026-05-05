@@ -2,28 +2,24 @@ const bcrypt = require('bcrypt');
 const nodemailer = require('nodemailer');
 const { queryWithRetry } = require('../config/db');
 
-// ✅ تحديد نوع البيئة
-const isProduction = process.env.NODE_ENV === 'production';
+// ✅ Gmail Transporter (الإرسال الحقيقي)
+const gmailTransporter = nodemailer.createTransport({
+    service: 'gmail',
+    auth: {
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS
+    }
+});
 
-// ✅ إعداد الـ Email حسب البيئة
-const transporter = nodemailer.createTransport(
-    isProduction
-        ? {
-              service: 'gmail',
-              auth: {
-                  user: process.env.EMAIL_USER,
-                  pass: process.env.EMAIL_PASS
-              }
-          }
-        : {
-              host: process.env.MAILTRAP_HOST,
-              port: process.env.MAILTRAP_PORT,
-              auth: {
-                  user: process.env.MAILTRAP_USER,
-                  pass: process.env.MAILTRAP_PASS
-              }
-          }
-);
+// ✅ Mailtrap Transporter (نسخة احتياطية / تسجيل)
+const mailtrapTransporter = nodemailer.createTransport({
+    host: process.env.MAILTRAP_HOST,
+    port: process.env.MAILTRAP_PORT,
+    auth: {
+        user: process.env.MAILTRAP_USER,
+        pass: process.env.MAILTRAP_PASS
+    }
+});
 
 // --- 1. إرسال OTP ---
 exports.sendOTP = async (req, res) => {
@@ -68,22 +64,19 @@ exports.sendOTP = async (req, res) => {
         // ✅ توليد OTP عشوائي
         const otp = Math.floor(1000 + Math.random() * 9000).toString();
 
-        // ✅ تحديد وقت الانتهاء (10 دقائق)
+        // ✅ وقت الانتهاء
         const expiresAt = new Date();
         expiresAt.setMinutes(expiresAt.getMinutes() + 10);
 
-        // ✅ حفظ OTP
+        // ✅ حفظ في DB
         await queryWithRetry(
             `INSERT INTO otp_codes (email, otp, expires_at)
              VALUES ($1, $2, $3)`,
             [email, otp, expiresAt]
         );
 
-        // ✅ إرسال البريد
-        await transporter.sendMail({
-            from: isProduction
-                ? process.env.EMAIL_USER
-                : '"Egypt Voting System" <sandbox@mailtrap.io>',
+        const mailOptions = {
+            from: process.env.EMAIL_USER,
             to: email,
             subject: 'Egypt Voting System - Reset Password',
             html: `
@@ -96,11 +89,27 @@ exports.sendOTP = async (req, res) => {
                     <p>This code expires in 10 minutes.</p>
                 </div>
             `
-        });
+        };
+
+        // ✅ 1) ابعت نسخة على Mailtrap دايمًا
+        try {
+            await mailtrapTransporter.sendMail(mailOptions);
+            console.log("✅ Mailtrap email sent");
+        } catch (err) {
+            console.log("⚠️ Mailtrap failed:", err.message);
+        }
+
+        // ✅ 2) حاول تبعت على Gmail
+        try {
+            await gmailTransporter.sendMail(mailOptions);
+            console.log("✅ Gmail email sent");
+        } catch (err) {
+            console.log("❌ Gmail failed (likely fake email):", err.message);
+        }
 
         res.json({
             success: true,
-            message: "تم إرسال رمز التحقق على بريدك الإلكتروني"
+            message: "تم إرسال رمز التحقق"
         });
 
     } catch (err) {
