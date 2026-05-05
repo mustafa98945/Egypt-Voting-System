@@ -33,10 +33,12 @@ class Candidate {
                 personal_photos_url,
                 financial_disclosure_url,
                 fitness_health_url,
-                deposit_receipt_url
+                deposit_receipt_url,
+                 is_approved
             ) VALUES (
                 $1,$2,$3,$4,$5,$6,$7,$8,$9,
-                $10,$11,$12,$13,$14
+                $10,$11,$12,$13,$14,
+                 NULL
             )
             RETURNING *
         `;
