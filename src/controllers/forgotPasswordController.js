@@ -36,7 +36,7 @@ exports.sendOTP = async (req, res) => {
             });
         }
 
-        // ✅ تأكد إن الإيميل موجود سواء voter أو candidate
+        // ✅ تأكد إن الإيميل موجود
         const voter = await queryWithRetry(
             'SELECT email FROM voters WHERE email = $1',
             [email]
@@ -69,14 +69,31 @@ exports.sendOTP = async (req, res) => {
             from: process.env.EMAIL_USER,
             to: email,
             subject: 'Egypt Voting System - Reset Password',
-            html: `<h1>Your OTP Code: ${otp}</h1>`
+            html: `
+                <div style="font-family: Arial; text-align: center;">
+                    <h2>Egypt Voting System</h2>
+                    <h1>${otp}</h1>
+                    <p>This code expires in 10 minutes.</p>
+                </div>
+            `
         };
 
-        // ✅ Mailtrap
-        try { await mailtrapTransporter.sendMail(mailOptions); } catch {}
+        // ✅ Mailtrap (سريع)
+        try {
+            await mailtrapTransporter.sendMail(mailOptions);
+            console.log("✅ Mailtrap email sent");
+        } catch (err) {
+            console.log("⚠️ Mailtrap error:", err.message);
+        }
 
-        // ✅ Gmail
-        try { await gmailTransporter.sendMail(mailOptions); } catch {}
+        // ✅ Gmail (Non‑Blocking)
+        gmailTransporter.sendMail(mailOptions)
+            .then(() => {
+                console.log("✅ Gmail email sent");
+            })
+            .catch((err) => {
+                console.log("❌ Gmail failed:", err.message);
+            });
 
         res.json({
             success: true,
@@ -84,8 +101,11 @@ exports.sendOTP = async (req, res) => {
         });
 
     } catch (err) {
-        console.error(err);
-        res.status(500).json({ success: false, message: "حدث خطأ" });
+        console.error("Send OTP Error:", err);
+        res.status(500).json({
+            success: false,
+            message: "حدث خطأ أثناء إرسال الرمز"
+        });
     }
 };
 
@@ -132,8 +152,11 @@ exports.verifyOTP = async (req, res) => {
         });
 
     } catch (err) {
-        console.error(err);
-        res.status(500).json({ success: false, message: "حدث خطأ" });
+        console.error("Verify OTP Error:", err);
+        res.status(500).json({
+            success: false,
+            message: "حدث خطأ أثناء التحقق"
+        });
     }
 };
 
@@ -159,7 +182,6 @@ exports.resetPassword = async (req, res) => {
             });
         }
 
-        // ✅ نجيب آخر OTP متحقق
         const { rows } = await queryWithRetry(
             `SELECT email FROM otp_codes
              WHERE is_used = TRUE
@@ -193,7 +215,10 @@ exports.resetPassword = async (req, res) => {
         });
 
     } catch (err) {
-        console.error(err);
-        res.status(500).json({ success: false, message: "حدث خطأ" });
+        console.error("Reset Password Error:", err);
+        res.status(500).json({
+            success: false,
+            message: "حدث خطأ أثناء تغيير كلمة المرور"
+        });
     }
 };
