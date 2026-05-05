@@ -1,15 +1,29 @@
 const bcrypt = require('bcrypt');
 const nodemailer = require('nodemailer');
-const { pool, queryWithRetry } = require('../config/db');
+const { queryWithRetry } = require('../config/db');
 
-// إعداد الـ Email
-const transporter = nodemailer.createTransport({
-    service: 'gmail',
-    auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS
-    }
-});
+// ✅ تحديد نوع البيئة
+const isProduction = process.env.NODE_ENV === 'production';
+
+// ✅ إعداد الـ Email حسب البيئة
+const transporter = nodemailer.createTransport(
+    isProduction
+        ? {
+              service: 'gmail',
+              auth: {
+                  user: process.env.EMAIL_USER,
+                  pass: process.env.EMAIL_PASS
+              }
+          }
+        : {
+              host: process.env.MAILTRAP_HOST,
+              port: process.env.MAILTRAP_PORT,
+              auth: {
+                  user: process.env.MAILTRAP_USER,
+                  pass: process.env.MAILTRAP_PASS
+              }
+          }
+);
 
 // --- 1. إرسال OTP ---
 exports.sendOTP = async (req, res) => {
@@ -23,16 +37,18 @@ exports.sendOTP = async (req, res) => {
             });
         }
 
-        // التحقق من وجود الـ email
         let user;
+
         if (role === 'voter') {
             const { rows } = await queryWithRetry(
-                'SELECT * FROM voters WHERE email = $1', [email]
+                'SELECT * FROM voters WHERE email = $1',
+                [email]
             );
             user = rows[0];
         } else if (role === 'candidate') {
             const { rows } = await queryWithRetry(
-                'SELECT * FROM candidates WHERE email = $1', [email]
+                'SELECT * FROM candidates WHERE email = $1',
+                [email]
             );
             user = rows[0];
         } else {
@@ -49,23 +65,25 @@ exports.sendOTP = async (req, res) => {
             });
         }
 
-        // توليد OTP عشوائي (4 أرقام)
+        // ✅ توليد OTP عشوائي
         const otp = Math.floor(1000 + Math.random() * 9000).toString();
 
-        // وقت انتهاء الـ OTP (10 دقائق)
+        // ✅ تحديد وقت الانتهاء (10 دقائق)
         const expiresAt = new Date();
         expiresAt.setMinutes(expiresAt.getMinutes() + 10);
 
-        // حفظ الـ OTP في الداتا بيز
+        // ✅ حفظ OTP
         await queryWithRetry(
             `INSERT INTO otp_codes (email, otp, expires_at)
              VALUES ($1, $2, $3)`,
             [email, otp, expiresAt]
         );
 
-        // إرسال الـ OTP على الـ Email
+        // ✅ إرسال البريد
         await transporter.sendMail({
-            from: process.env.EMAIL_USER,
+            from: isProduction
+                ? process.env.EMAIL_USER
+                : '"Egypt Voting System" <sandbox@mailtrap.io>',
             to: email,
             subject: 'Egypt Voting System - Reset Password',
             html: `
@@ -87,7 +105,10 @@ exports.sendOTP = async (req, res) => {
 
     } catch (err) {
         console.error("Send OTP Error:", err);
-        res.status(500).json({ success: false, message: err.message });
+        res.status(500).json({
+            success: false,
+            message: "حدث خطأ أثناء إرسال الرمز"
+        });
     }
 };
 
@@ -103,7 +124,6 @@ exports.verifyOTP = async (req, res) => {
             });
         }
 
-        // البحث عن الـ OTP
         const { rows } = await queryWithRetry(
             `SELECT * FROM otp_codes
              WHERE email = $1
@@ -122,7 +142,6 @@ exports.verifyOTP = async (req, res) => {
             });
         }
 
-        // تعيين الـ OTP كمستخدم
         await queryWithRetry(
             'UPDATE otp_codes SET is_used = TRUE WHERE id = $1',
             [rows[0].id]
@@ -135,7 +154,10 @@ exports.verifyOTP = async (req, res) => {
 
     } catch (err) {
         console.error("Verify OTP Error:", err);
-        res.status(500).json({ success: false, message: err.message });
+        res.status(500).json({
+            success: false,
+            message: "حدث خطأ أثناء التحقق"
+        });
     }
 };
 
@@ -179,6 +201,9 @@ exports.resetPassword = async (req, res) => {
 
     } catch (err) {
         console.error("Reset Password Error:", err);
-        res.status(500).json({ success: false, message: err.message });
+        res.status(500).json({
+            success: false,
+            message: "حدث خطأ أثناء تغيير كلمة المرور"
+        });
     }
 };
