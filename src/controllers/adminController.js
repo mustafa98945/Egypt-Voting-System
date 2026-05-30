@@ -461,3 +461,240 @@ exports.getDashboardStats = async (req, res) => {
         res.status(500).json({ success: false, message: err.message });
     }
 };
+
+exports.getElectoralDistricts = async (req, res) => {
+    try {
+        const { rows } = await queryWithRetry(
+            `SELECT 
+                ed.district_id,
+                ed.district_name,
+                ed.governorate,
+                ed.district_code,
+                -- عدد الناخبين المسجلين (18+) من voters
+                (
+                    SELECT COUNT(*) 
+                    FROM voters v
+                    JOIN civil_registry cr 
+                      ON TRIM(v.national_id) = TRIM(cr.national_id)
+                    WHERE TRIM(cr.administrative_unit) = TRIM(ed.district_name)
+                ) +
+                -- عدد المرشحين المقبولين (18+) من candidates
+                (
+                    SELECT COUNT(*) 
+                    FROM candidates c
+                    JOIN civil_registry cr 
+                      ON TRIM(c.national_id) = TRIM(cr.national_id)
+                    WHERE TRIM(cr.administrative_unit) = TRIM(ed.district_name)
+                    AND c.is_approved = TRUE
+                ) AS register_voter_count
+             FROM electoral_districts ed
+             ORDER BY ed.district_name ASC`
+        );
+
+        res.json({
+            success: true,
+            count: rows.length,
+            data: rows
+        });
+
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+};
+
+// --- جلب كل الأحزاب ---
+exports.getAllParties = async (req, res) => {
+    try {
+        const { rows } = await queryWithRetry(
+            `SELECT * FROM political_parties 
+             ORDER BY party_number ASC`
+        );
+
+        res.json({
+            success: true,
+            count: rows.length,
+            data: rows
+        });
+
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+};
+
+// --- إضافة حزب ---
+exports.addParty = async (req, res) => {
+    try {
+        const { 
+            party_name, leader_name, ideology, 
+            found_date, symbol, governorate, party_number 
+        } = req.body;
+
+        if (!party_name || !leader_name) {
+            return res.status(400).json({
+                success: false,
+                message: "اسم الحزب واسم الزعيم مطلوبان"
+            });
+        }
+
+        const { rows } = await queryWithRetry(
+            `INSERT INTO political_parties 
+             (party_name, leader_name, ideology, found_date, symbol, governorate, party_number)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)
+             RETURNING *`,
+            [party_name, leader_name, ideology, found_date, symbol, governorate, party_number]
+        );
+
+        res.status(201).json({
+            success: true,
+            message: "تم إضافة الحزب بنجاح",
+            data: rows[0]
+        });
+
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+};
+
+// --- تعديل حزب ---
+exports.editParty = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { 
+            party_name, leader_name, ideology, 
+            found_date, symbol, governorate, party_number 
+        } = req.body;
+
+        const { rows } = await queryWithRetry(
+            `UPDATE political_parties SET
+                party_name   = COALESCE($1, party_name),
+                leader_name  = COALESCE($2, leader_name),
+                ideology     = COALESCE($3, ideology),
+                found_date   = COALESCE($4, found_date),
+                symbol       = COALESCE($5, symbol),
+                governorate  = COALESCE($6, governorate),
+                party_number = COALESCE($7, party_number)
+             WHERE party_id = $8
+             RETURNING *`,
+            [party_name, leader_name, ideology, found_date, symbol, governorate, party_number, id]
+        );
+
+        res.json({
+            success: true,
+            message: "تم تعديل الحزب بنجاح",
+            data: rows[0]
+        });
+
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+};
+
+// --- حذف حزب ---
+exports.deleteParty = async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        await queryWithRetry(
+            'DELETE FROM political_parties WHERE party_id = $1',
+            [id]
+        );
+
+        res.json({
+            success: true,
+            message: "تم حذف الحزب بنجاح"
+        });
+
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+};
+
+// --- 1. نتايج الانتخابات للـ Admin ---
+exports.getElectionResults = async (req, res) => {
+    try {
+        // جلب آخر انتخابات
+        const { rows: electionRows } = await queryWithRetry(
+            `SELECT * FROM elections 
+             ORDER BY created_at DESC 
+             LIMIT 1`
+        );
+
+        if (electionRows.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: "لا توجد انتخابات"
+            });
+        }
+
+        const election = electionRows[0];
+
+        // جلب النتايج مرتبة من الأعلى تصويتاً
+        const { rows } = await queryWithRetry(
+            `SELECT 
+                c.candidate_id,
+                cr.full_name,
+                c.personal_photos_url,
+                c.candidate_type,
+                COUNT(v.vote_id)::INT AS total_votes
+             FROM candidates c
+             LEFT JOIN civil_registry cr 
+               ON TRIM(c.national_id) = TRIM(cr.national_id)
+             LEFT JOIN votes v 
+               ON c.candidate_id = v.candidate_id
+             WHERE c.is_approved = TRUE
+             GROUP BY 
+                c.candidate_id, cr.full_name, 
+                c.personal_photos_url, c.candidate_type
+             ORDER BY total_votes DESC`
+        );
+
+        res.json({
+            success: true,
+            election: {
+                id: election.election_id,
+                name: election.election_name,
+                start_date: election.start_date,
+                end_date: election.end_date,
+                result_status: election.result_status
+            },
+            data: rows
+        });
+
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+};
+
+// --- 2. اعتماد أو إبطال النتيجة ---
+exports.decideElectionResult = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { decision } = req.body;
+
+        if (!decision || !['approved', 'refused'].includes(decision)) {
+            return res.status(400).json({
+                success: false,
+                message: "يرجى إدخال القرار: approved أو refused"
+            });
+        }
+
+        const { rows } = await queryWithRetry(
+            `UPDATE elections 
+             SET result_status = $1
+             WHERE election_id = $2
+             RETURNING *`,
+            [decision, id]
+        );
+
+        res.json({
+            success: true,
+            message: decision === 'approved' 
+                ? "تم اعتماد نتيجة الانتخابات بنجاح ✅" 
+                : "تم إبطال الانتخابات ❌",
+            data: rows[0]
+        });
+
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+};

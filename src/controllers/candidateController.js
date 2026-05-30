@@ -49,6 +49,21 @@ exports.verifyBeforeRegister = async (req, res) => {
             });
         }
 
+            const birthDate = new Date(citizen.birth_date);
+const today = new Date();
+let age = today.getFullYear() - birthDate.getFullYear();
+const monthDiff = today.getMonth() - birthDate.getMonth();
+if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+    age--;
+}
+
+if (age < 18) {
+    return res.status(400).json({
+        success: false,
+        message: "يجب أن يكون عمرك 18 سنة أو أكثر للتسجيل"
+    });
+}
+
         res.json({
             success: true,
             data: {

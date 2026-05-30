@@ -85,23 +85,20 @@ exports.getVoteCard = async (req, res) => {
 // --- 4. نتائج الانتخابات (كل المرشحين بأصواتهم وصورهم) ---
 exports.getResults = async (req, res) => {
     try {
-        // ✅ التحقق من حالة الانتخابات الأول
         const { rows: electionRows } = await pool.query(
-            `SELECT status FROM (
-                SELECT 
-                    CASE 
-                        WHEN CURRENT_DATE < start_date THEN 'not_started'
-                        WHEN CURRENT_DATE BETWEEN start_date AND end_date THEN 'active'
-                        WHEN CURRENT_DATE > end_date THEN 'ended'
-                    END AS status
-                FROM elections
-                WHERE is_active = TRUE
-                ORDER BY created_at DESC
-                LIMIT 1
-            ) sub`
+            `SELECT 
+                result_status,
+                CASE 
+                    WHEN CURRENT_DATE < start_date THEN 'not_started'
+                    WHEN CURRENT_DATE BETWEEN start_date AND end_date THEN 'active'
+                    WHEN CURRENT_DATE > end_date THEN 'ended'
+                END AS status
+             FROM elections
+             WHERE is_active = TRUE
+             ORDER BY created_at DESC
+             LIMIT 1`
         );
 
-        // لو مفيش انتخابات أو لسه مش خلصت
         if (electionRows.length === 0) {
             return res.status(403).json({
                 success: false,
@@ -109,14 +106,33 @@ exports.getResults = async (req, res) => {
             });
         }
 
-        if (electionRows[0].status !== 'ended') {
+        const election = electionRows[0];
+
+        // ✅ لو الانتخابات لسه شغالة
+        if (election.status !== 'ended') {
             return res.status(403).json({
                 success: false,
                 message: "النتائج ستظهر بعد انتهاء فترة التصويت"
             });
         }
 
-        // ✅ لو الانتخابات خلصت → ارجع النتايج
+        // ✅ لو الانتخابات خلصت بس مش معتمدة
+        if (election.result_status === null) {
+            return res.status(403).json({
+                success: false,
+                message: "النتائج قيد المراجعة من قِبل اللجنة الانتخابية"
+            });
+        }
+
+        // ✅ لو الانتخابات باطلة
+        if (election.result_status === 'refused') {
+            return res.status(403).json({
+                success: false,
+                message: "تم إبطال نتيجة الانتخابات من قِبل اللجنة الانتخابية"
+            });
+        }
+
+        // ✅ لو معتمدة → ارجع النتايج
         const userUnit = req.user.administrative_unit;
 
         const { rows } = await pool.query(
@@ -126,7 +142,6 @@ exports.getResults = async (req, res) => {
                 c.personal_photos_url,
                 c.candidate_type,
                 c.election_symbol_url,
-                cr.administrative_unit,
                 COUNT(v.vote_id)::INT AS total_votes
             FROM candidates c
             LEFT JOIN civil_registry cr ON TRIM(c.national_id) = TRIM(cr.national_id)
@@ -135,7 +150,7 @@ exports.getResults = async (req, res) => {
             AND c.is_approved = TRUE
             GROUP BY 
                 c.candidate_id, cr.full_name, c.personal_photos_url,
-                c.candidate_type, c.election_symbol_url, cr.administrative_unit
+                c.candidate_type, c.election_symbol_url
             ORDER BY total_votes DESC`,
             [userUnit]
         );

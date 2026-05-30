@@ -14,6 +14,18 @@ router.delete('/delete/:id', adminMiddleware, adminController.deleteAdmin);
 router.put('/edit/:id', adminMiddleware, adminController.editAdmin);
 router.get('/dashboard/stats', adminMiddleware, adminController.getDashboardStats);
 
+// ✅ Electoral Districts
+router.get('/districts', adminMiddleware, adminController.getElectoralDistricts);
+
+// Political Parties
+router.get('/parties', adminMiddleware, adminController.getAllParties);
+router.post('/parties/add', adminMiddleware, adminController.addParty);
+router.put('/parties/edit/:id', adminMiddleware, adminController.editParty);
+router.delete('/parties/delete/:id', adminMiddleware, adminController.deleteParty);
+
+router.get('/election/results', adminMiddleware, adminController.getElectionResults);
+router.put('/election/results/:id/decision', adminMiddleware, adminController.decideElectionResult);
+
 // ✅ الـ specific routes الأول
 router.get('/candidates/pending', adminMiddleware, adminController.getPendingCandidates);
 router.get('/candidates/accepted', adminMiddleware, adminController.getAcceptedCandidates);
