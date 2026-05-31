@@ -703,21 +703,28 @@ exports.getVotesData = async (req, res) => {
     try {
         const { rows } = await queryWithRetry(
             `SELECT 
-                cr_voter.username        AS v_code,
+                COALESCE(cr_voter.username, cr_candidate_voter.username) AS v_code,
                 v.created_at::TIME       AS time,
                 v.created_at::DATE       AS data,
-                cr_voter.national_id     AS v_national_id,
-                cr_voter.full_name       AS voter_name,
+                COALESCE(cr_voter.national_id, cr_candidate_voter.national_id) AS v_national_id,
+                COALESCE(cr_voter.full_name, cr_candidate_voter.full_name)     AS voter_name,
                 e.election_name          AS election_name,
                 cr_candidate.national_id AS c_national_id,
                 cr_candidate.full_name   AS candidate_name
              FROM votes v
-             -- بيانات الـ voter
+             -- لو voter
              LEFT JOIN voters vt 
-               ON v.voter_id = vt.voter_id
+               ON v.voter_id = vt.voter_id 
+               AND v.voter_role = 'voter'
              LEFT JOIN civil_registry cr_voter 
                ON TRIM(vt.national_id) = TRIM(cr_voter.national_id)
-             -- بيانات الـ candidate
+             -- لو candidate بيصوت
+             LEFT JOIN candidates cd_voter
+               ON v.voter_id = cd_voter.candidate_id 
+               AND v.voter_role = 'candidate'
+             LEFT JOIN civil_registry cr_candidate_voter 
+               ON TRIM(cd_voter.national_id) = TRIM(cr_candidate_voter.national_id)
+             -- بيانات المرشح المصوت له
              LEFT JOIN candidates c 
                ON v.candidate_id = c.candidate_id
              LEFT JOIN civil_registry cr_candidate 
@@ -728,8 +735,7 @@ exports.getVotesData = async (req, res) => {
                    SELECT election_id FROM elections 
                    ORDER BY created_at DESC LIMIT 1
                )
-             -- ✅ شيل الـ NULL
-             WHERE cr_voter.national_id IS NOT NULL
+             WHERE COALESCE(cr_voter.national_id, cr_candidate_voter.national_id) IS NOT NULL
              AND cr_candidate.national_id IS NOT NULL
              ORDER BY v.created_at DESC`
         );
@@ -748,16 +754,16 @@ exports.getVotesData = async (req, res) => {
 exports.getVotersStatus = async (req, res) => {
     try {
         const { rows } = await queryWithRetry(
-            `SELECT 
+            `-- Voters
+             SELECT 
                 ROW_NUMBER() OVER (ORDER BY vt.voter_id) AS voter_number,
                 vt.national_id                           AS v_national_id,
                 cr_voter.full_name                       AS v_name,
-                -- لو صوت → اسم المرشح، لو لأ → رسالة
+                'voter'                                  AS role,
                 CASE 
                     WHEN vt.has_voted = TRUE THEN cr_candidate.full_name
                     ELSE 'Has Not Voted Yet'
                 END AS voted_for,
-                -- حالة التصويت
                 CASE 
                     WHEN vt.has_voted = TRUE THEN 'Voted'
                     ELSE 'Not Voted Yet'
@@ -765,14 +771,42 @@ exports.getVotersStatus = async (req, res) => {
              FROM voters vt
              LEFT JOIN civil_registry cr_voter 
                ON TRIM(vt.national_id) = TRIM(cr_voter.national_id)
-             -- جلب اسم المرشح اللي صوتله
              LEFT JOIN votes v 
                ON vt.voter_id = v.voter_id
              LEFT JOIN candidates c 
                ON v.candidate_id = c.candidate_id
              LEFT JOIN civil_registry cr_candidate 
                ON TRIM(c.national_id) = TRIM(cr_candidate.national_id)
-             ORDER BY vt.voter_id ASC`
+
+             UNION ALL
+
+             -- Candidates
+             SELECT 
+                ROW_NUMBER() OVER (ORDER BY cd.candidate_id) AS voter_number,
+                cd.national_id                               AS v_national_id,
+                cr_candidate.full_name                       AS v_name,
+                'candidate'                                  AS role,
+                CASE 
+                    WHEN cd.has_voted = TRUE THEN cr_voted_for.full_name
+                    ELSE 'Has Not Voted Yet'
+                END AS voted_for,
+                CASE 
+                    WHEN cd.has_voted = TRUE THEN 'Voted'
+                    ELSE 'Not Voted Yet'
+                END AS status
+             FROM candidates cd
+             LEFT JOIN civil_registry cr_candidate 
+               ON TRIM(cd.national_id) = TRIM(cr_candidate.national_id)
+             LEFT JOIN votes v 
+               ON cd.candidate_id = v.candidate_id 
+               AND v.voter_role = 'candidate'
+             LEFT JOIN candidates c_voted 
+               ON v.candidate_id = c_voted.candidate_id
+             LEFT JOIN civil_registry cr_voted_for 
+               ON TRIM(c_voted.national_id) = TRIM(cr_voted_for.national_id)
+             WHERE cd.is_approved = TRUE
+
+             ORDER BY role, voter_number ASC`
         );
 
         res.json({
