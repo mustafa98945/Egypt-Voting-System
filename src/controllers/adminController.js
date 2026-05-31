@@ -703,7 +703,7 @@ exports.getVotesData = async (req, res) => {
     try {
         const { rows } = await queryWithRetry(
             `SELECT 
-                v.v_code AS v_code,
+                v.vote_id AS v_code,
                 v.created_at::TIME       AS time,
                 v.created_at::DATE       AS data,
                 COALESCE(
