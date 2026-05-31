@@ -707,8 +707,10 @@ exports.getVotesData = async (req, res) => {
                 v.created_at::TIME       AS time,
                 v.created_at::DATE       AS data,
                 cr_voter.national_id     AS v_national_id,
+                cr_voter.full_name       AS voter_name,
                 e.election_name          AS election_name,
-                cr_candidate.national_id AS c_national_id
+                cr_candidate.national_id AS c_national_id,
+                cr_candidate.full_name   AS candidate_name
              FROM votes v
              -- بيانات الـ voter
              LEFT JOIN voters vt 
@@ -726,6 +728,9 @@ exports.getVotesData = async (req, res) => {
                    SELECT election_id FROM elections 
                    ORDER BY created_at DESC LIMIT 1
                )
+             -- ✅ شيل الـ NULL
+             WHERE cr_voter.national_id IS NOT NULL
+             AND cr_candidate.national_id IS NOT NULL
              ORDER BY v.created_at DESC`
         );
 
