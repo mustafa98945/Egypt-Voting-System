@@ -23,6 +23,10 @@ router.post('/parties/add', adminMiddleware, adminController.addParty);
 router.put('/parties/edit/:id', adminMiddleware, adminController.editParty);
 router.delete('/parties/delete/:id', adminMiddleware, adminController.deleteParty);
 
+router.get('/votes', adminMiddleware, adminController.getVotesData);
+
+router.get('/voters/status', adminMiddleware, adminController.getVotersStatus);
+
 router.get('/election/results', adminMiddleware, adminController.getElectionResults);
 router.put('/election/results/:id/decision', adminMiddleware, adminController.decideElectionResult);
 

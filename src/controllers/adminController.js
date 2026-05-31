@@ -698,3 +698,85 @@ exports.decideElectionResult = async (req, res) => {
         res.status(500).json({ success: false, message: err.message });
     }
 };
+
+exports.getVotesData = async (req, res) => {
+    try {
+        const { rows } = await queryWithRetry(
+            `SELECT 
+                cr_voter.username        AS v_code,
+                v.created_at::TIME       AS time,
+                v.created_at::DATE       AS data,
+                cr_voter.national_id     AS v_national_id,
+                e.election_name          AS election_name,
+                cr_candidate.national_id AS c_national_id
+             FROM votes v
+             -- بيانات الـ voter
+             LEFT JOIN voters vt 
+               ON v.voter_id = vt.voter_id
+             LEFT JOIN civil_registry cr_voter 
+               ON TRIM(vt.national_id) = TRIM(cr_voter.national_id)
+             -- بيانات الـ candidate
+             LEFT JOIN candidates c 
+               ON v.candidate_id = c.candidate_id
+             LEFT JOIN civil_registry cr_candidate 
+               ON TRIM(c.national_id) = TRIM(cr_candidate.national_id)
+             -- بيانات الانتخابات
+             LEFT JOIN elections e 
+               ON e.election_id = (
+                   SELECT election_id FROM elections 
+                   ORDER BY created_at DESC LIMIT 1
+               )
+             ORDER BY v.created_at DESC`
+        );
+
+        res.json({
+            success: true,
+            count: rows.length,
+            data: rows
+        });
+
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+};
+
+exports.getVotersStatus = async (req, res) => {
+    try {
+        const { rows } = await queryWithRetry(
+            `SELECT 
+                ROW_NUMBER() OVER (ORDER BY vt.voter_id) AS voter_number,
+                vt.national_id                           AS v_national_id,
+                cr_voter.full_name                       AS v_name,
+                -- لو صوت → اسم المرشح، لو لأ → رسالة
+                CASE 
+                    WHEN vt.has_voted = TRUE THEN cr_candidate.full_name
+                    ELSE 'Has Not Voted Yet'
+                END AS voted_for,
+                -- حالة التصويت
+                CASE 
+                    WHEN vt.has_voted = TRUE THEN 'Voted'
+                    ELSE 'Not Voted Yet'
+                END AS status
+             FROM voters vt
+             LEFT JOIN civil_registry cr_voter 
+               ON TRIM(vt.national_id) = TRIM(cr_voter.national_id)
+             -- جلب اسم المرشح اللي صوتله
+             LEFT JOIN votes v 
+               ON vt.voter_id = v.voter_id
+             LEFT JOIN candidates c 
+               ON v.candidate_id = c.candidate_id
+             LEFT JOIN civil_registry cr_candidate 
+               ON TRIM(c.national_id) = TRIM(cr_candidate.national_id)
+             ORDER BY vt.voter_id ASC`
+        );
+
+        res.json({
+            success: true,
+            count: rows.length,
+            data: rows
+        });
+
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+};
