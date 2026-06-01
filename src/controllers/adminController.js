@@ -470,23 +470,15 @@ exports.getElectoralDistricts = async (req, res) => {
                 ed.district_name,
                 ed.governorate,
                 ed.district_code,
-                -- عدد الناخبين المسجلين (18+) من voters
+
+                -- ✅ عدد المواطنين 18+ من السجل المدني
                 (
-                    SELECT COUNT(*) 
-                    FROM voters v
-                    JOIN civil_registry cr 
-                      ON TRIM(v.national_id) = TRIM(cr.national_id)
+                    SELECT COUNT(*)
+                    FROM civil_registry cr
                     WHERE TRIM(cr.administrative_unit) = TRIM(ed.district_name)
-                ) +
-                -- عدد المرشحين المقبولين (18+) من candidates
-                (
-                    SELECT COUNT(*) 
-                    FROM candidates c
-                    JOIN civil_registry cr 
-                      ON TRIM(c.national_id) = TRIM(cr.national_id)
-                    WHERE TRIM(cr.administrative_unit) = TRIM(ed.district_name)
-                    AND c.is_approved = TRUE
+                    AND DATE_PART('year', AGE(CURRENT_DATE, cr.birth_date)) >= 18
                 ) AS register_voter_count
+
              FROM electoral_districts ed
              ORDER BY ed.district_name ASC`
         );
