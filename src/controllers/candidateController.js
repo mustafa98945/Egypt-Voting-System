@@ -278,53 +278,38 @@ exports.loginCandidate = async (req, res) => {
 exports.listCandidates = async (req, res) => {
     try {
         const userUnit = req.user.administrative_unit;
-        const userGov = req.user.governorate; // ← محتاج تضيفه في التوكن
+        const userGov = req.user.governorate;
 
-        if (!userUnit) {
+        if (!userUnit || !userGov) {
             return res.status(400).json({
                 success: false,
-                message: "الوحدة الإدارية غير موجودة"
+                message: "بيانات المستخدم غير مكتملة"
             });
         }
 
-        // ✅ التحقق من حالة الانتخابات للمحافظة دي
+        // ✅ تحقق إن في انتخابات شغالة بالساعة للمحافظة دي
         const { rows: electionRows } = await pool.query(
-            `SELECT *,
-                CASE 
-                    WHEN CURRENT_DATE < start_date THEN 'not_started'
-                    WHEN CURRENT_DATE BETWEEN start_date AND end_date THEN 'active'
-                    WHEN CURRENT_DATE > end_date THEN 'ended'
-                END AS status
+            `SELECT election_id
              FROM elections
              WHERE is_active = TRUE
-             AND (
-                 TRIM(governorate) = TRIM($1)
-                 OR governorate IS NULL
-             )
+             AND TRIM(governorate) = TRIM($1)
+             AND CURRENT_TIMESTAMP >= start_date
+             AND CURRENT_TIMESTAMP <= end_date
              ORDER BY created_at DESC
              LIMIT 1`,
-            [userGov || '']
+            [userGov]
         );
 
         if (electionRows.length === 0) {
             return res.status(403).json({
                 success: false,
-                message: "لا توجد انتخابات لمحافظتك حالياً"
+                message: "لا توجد انتخابات نشطة لمحافظتك حالياً"
             });
         }
 
-        if (electionRows[0].status !== 'active') {
-            return res.status(403).json({
-                success: false,
-                message: electionRows[0].status === 'not_started'
-                    ? `الانتخابات لم تبدأ بعد - تبدأ في ${electionRows[0].start_date}`
-                    : "انتهت فترة الانتخابات لمحافظتك"
-            });
-        }
-
-        // ✅ جيب المرشحين المقبولين في نفس الـ administrative_unit
-        const query = `
-            SELECT 
+        // ✅ جيب المرشحين المقبولين في نفس الوحدة الإدارية
+        const { rows } = await pool.query(
+            `SELECT 
                 c.candidate_id,
                 cr.full_name AS name,
                 DATE_PART('year', AGE(CURRENT_DATE, cr.birth_date))::INT AS age,
@@ -333,15 +318,14 @@ exports.listCandidates = async (req, res) => {
                 c.short_bio,
                 c.personal_photos_url AS personal_photo,
                 c.election_symbol_url AS symbol
-            FROM candidates c
-            JOIN civil_registry cr
-              ON TRIM(c.national_id) = TRIM(cr.national_id)
-            WHERE TRIM(cr.administrative_unit) = TRIM($1)
-            AND c.is_approved = TRUE
-            ORDER BY c.created_at DESC
-        `;
-
-        const { rows } = await pool.query(query, [userUnit]);
+             FROM candidates c
+             JOIN civil_registry cr
+               ON TRIM(c.national_id) = TRIM(cr.national_id)
+             WHERE TRIM(cr.administrative_unit) = TRIM($1)
+             AND c.is_approved = TRUE
+             ORDER BY c.created_at DESC`,
+            [userUnit]
+        );
 
         res.json({
             success: true,
@@ -350,7 +334,7 @@ exports.listCandidates = async (req, res) => {
         });
 
     } catch (err) {
-        console.error(err);
+        console.error("List Candidates Error:", err);
         res.status(500).json({
             success: false,
             message: "خطأ في تحميل القائمة"

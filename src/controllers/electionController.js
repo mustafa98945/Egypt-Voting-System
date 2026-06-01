@@ -1,8 +1,9 @@
-const { pool, queryWithRetry } = require('../config/db');
+const { pool } = require('../config/db');
 const { uploadToSupabase } = require('../utils/supabaseHelper');
 const sharp = require('sharp');
 
-// دالة رفع الصور
+
+// ✅ دالة رفع الصور
 const processAndUpload = async (base64String, fileName) => {
     try {
         if (!base64String) return null;
@@ -24,7 +25,11 @@ const processAndUpload = async (base64String, fileName) => {
     }
 };
 
-// --- 1. إنشاء انتخابات ---
+
+
+// ===============================
+// ✅ 1. إنشاء انتخابات
+// ===============================
 exports.createElection = async (req, res) => {
     try {
         const {
@@ -43,9 +48,17 @@ exports.createElection = async (req, res) => {
             });
         }
 
-        // ✅ جيب الـ group الحالي المفتوح
+        // ✅ تحويل التاريخ لبداية ونهاية اليوم
+        const start = new Date(start_date);
+        start.setHours(0, 0, 0, 0);
+
+        const end = new Date(end_date);
+        end.setHours(23, 59, 59, 999);
+
+        // ✅ الحصول على الجروب المفتوح
         let { rows: groupRows } = await pool.query(
-            `SELECT group_id FROM election_groups 
+            `SELECT group_id 
+             FROM election_groups 
              WHERE is_closed = FALSE 
              ORDER BY created_at DESC 
              LIMIT 1`
@@ -54,7 +67,6 @@ exports.createElection = async (req, res) => {
         let groupId;
 
         if (groupRows.length === 0) {
-            // ✅ مفيش group مفتوح → اعمل واحد جديد
             const { rows: newGroup } = await pool.query(
                 `INSERT INTO election_groups DEFAULT VALUES
                  RETURNING group_id`
@@ -63,9 +75,6 @@ exports.createElection = async (req, res) => {
         } else {
             groupId = groupRows[0].group_id;
         }
-
-        const today = new Date();
-        const isActive = today >= new Date(start_date) && today <= new Date(end_date);
 
         let logoUrl = null;
         if (logo_url) {
@@ -77,11 +86,16 @@ exports.createElection = async (req, res) => {
             `INSERT INTO elections 
              (election_type, election_name, governorate, logo_url, 
               start_date, end_date, is_active, election_group_id)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+             VALUES ($1, $2, $3, $4, $5, $6, TRUE, $7)
              RETURNING *`,
             [
-                election_type, election_name, governorate,
-                logoUrl, start_date, end_date, isActive, groupId
+                election_type,
+                election_name,
+                governorate,
+                logoUrl,
+                start,
+                end,
+                groupId
             ]
         );
 
@@ -96,7 +110,12 @@ exports.createElection = async (req, res) => {
         res.status(500).json({ success: false, message: err.message });
     }
 };
-// --- 2. تعديل انتخابات ---
+
+
+
+// ===============================
+// ✅ 2. تعديل انتخابات
+// ===============================
 exports.editElection = async (req, res) => {
     try {
         const { id } = req.params;
@@ -109,11 +128,11 @@ exports.editElection = async (req, res) => {
             end_date
         } = req.body;
 
-        // التحقق من وجود الانتخابات
         const { rows: existing } = await pool.query(
             'SELECT * FROM elections WHERE election_id = $1',
             [id]
         );
+
         if (existing.length === 0) {
             return res.status(404).json({
                 success: false,
@@ -121,20 +140,25 @@ exports.editElection = async (req, res) => {
             });
         }
 
-        // رفع الشعار لو اتغير
         let logoUrl = existing[0].logo_url;
         if (logo_url && logo_url !== existing[0].logo_url) {
             const fileName = `election_logo_${Date.now()}.jpg`;
             logoUrl = await processAndUpload(logo_url, fileName);
         }
 
-        // ✅ is_active بيتحدد تلقائي من التواريخ
-        const newStartDate = start_date || existing[0].start_date;
-        const newEndDate = end_date || existing[0].end_date;
-        const today = new Date();
-        const start = new Date(newStartDate);
-        const end = new Date(newEndDate);
-        const isActive = today >= start && today <= end;
+        // ✅ تحويل التاريخ لو تم إرساله
+        let start = existing[0].start_date;
+        let end = existing[0].end_date;
+
+        if (start_date) {
+            start = new Date(start_date);
+            start.setHours(0, 0, 0, 0);
+        }
+
+        if (end_date) {
+            end = new Date(end_date);
+            end.setHours(23, 59, 59, 999);
+        }
 
         const { rows } = await pool.query(
             `UPDATE elections SET
@@ -142,19 +166,17 @@ exports.editElection = async (req, res) => {
                 election_name = COALESCE($2, election_name),
                 governorate   = COALESCE($3, governorate),
                 logo_url      = $4,
-                start_date    = COALESCE($5, start_date),
-                end_date      = COALESCE($6, end_date),
-                is_active     = $7
-             WHERE election_id = $8
+                start_date    = $5,
+                end_date      = $6
+             WHERE election_id = $7
              RETURNING *`,
             [
                 election_type,
                 election_name,
-                governorate,  // ✅ مش بنستخدم COALESCE عشان نسمح بالتعديل
+                governorate,
                 logoUrl,
-                start_date,
-                end_date,
-                isActive,     // ✅ بيتحسب تلقائي
+                start,
+                end,
                 id
             ]
         );
@@ -170,24 +192,12 @@ exports.editElection = async (req, res) => {
         res.status(500).json({ success: false, message: err.message });
     }
 };
-exports.getAllElections = async (req, res) => {
-    try {
-        const { rows } = await pool.query(
-            `SELECT * FROM elections ORDER BY created_at DESC`
-        );
 
-        res.json({
-            success: true,
-            count: rows.length,
-            data: rows
-        });
 
-    } catch (err) {
-        res.status(500).json({ success: false, message: err.message });
-    }
-};
 
-// --- 4. حالة الانتخابات (للـ Flutter) ---
+// ===============================
+// ✅ 3. حالة الانتخابات (بالساعة)
+// ===============================
 exports.getElectionStatus = async (req, res) => {
     try {
         const { rows } = await pool.query(
@@ -200,9 +210,10 @@ exports.getElectionStatus = async (req, res) => {
                 start_date,
                 end_date,
                 CASE 
-                    WHEN CURRENT_DATE < start_date THEN 'not_started'
-                    WHEN CURRENT_DATE BETWEEN start_date AND end_date THEN 'active'
-                    WHEN CURRENT_DATE > end_date THEN 'ended'
+                    WHEN CURRENT_TIMESTAMP < start_date THEN 'not_started'
+                    WHEN CURRENT_TIMESTAMP >= start_date 
+                         AND CURRENT_TIMESTAMP <= end_date THEN 'active'
+                    ELSE 'ended'
                 END AS status
              FROM elections
              WHERE is_active = TRUE
@@ -214,8 +225,7 @@ exports.getElectionStatus = async (req, res) => {
             return res.json({
                 success: true,
                 election: null,
-                status: 'no_election',
-                message: "لا توجد انتخابات حالياً"
+                status: 'no_election'
             });
         }
 
@@ -233,7 +243,6 @@ exports.getElectionStatus = async (req, res) => {
                 start_date: election.start_date,
                 end_date: election.end_date
             },
-            // للـ Flutter عشان يعرف يعمل إيه
             show_voting: election.status === 'active',
             show_results: election.status === 'ended'
         });
@@ -244,7 +253,11 @@ exports.getElectionStatus = async (req, res) => {
     }
 };
 
-// --- 5. حذف انتخابات ---
+
+
+// ===============================
+// ✅ 4. حذف انتخابات
+// ===============================
 exports.deleteElection = async (req, res) => {
     try {
         const { id } = req.params;
