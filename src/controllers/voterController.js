@@ -164,15 +164,16 @@ exports.login = async (req, res) => {
         }
 
         const token = jwt.sign(
-            {
-                id: voter.voter_id,
-                national_id: voter.national_id,
-                role: 'voter',
-                administrative_unit: voter.administrative_unit
-            },
-            process.env.JWT_SECRET,
-            { expiresIn: '24h' }
-        );
+    { 
+        id: voter.voter_id,
+        national_id: voter.national_id,
+        role: 'voter',
+        administrative_unit: voter.administrative_unit,
+        governorate: voter.governorate  // ← جديد
+    },
+    process.env.JWT_SECRET,
+    { expiresIn: '24h' }
+);
 
         res.json({
             success: true,

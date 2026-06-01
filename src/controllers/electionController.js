@@ -43,18 +43,29 @@ exports.createElection = async (req, res) => {
             });
         }
 
-        if (new Date(start_date) >= new Date(end_date)) {
-            return res.status(400).json({
-                success: false,
-                message: "تاريخ البداية يجب أن يكون قبل تاريخ النهاية"
-            });
+        // ✅ جيب الـ group الحالي المفتوح
+        let { rows: groupRows } = await pool.query(
+            `SELECT group_id FROM election_groups 
+             WHERE is_closed = FALSE 
+             ORDER BY created_at DESC 
+             LIMIT 1`
+        );
+
+        let groupId;
+
+        if (groupRows.length === 0) {
+            // ✅ مفيش group مفتوح → اعمل واحد جديد
+            const { rows: newGroup } = await pool.query(
+                `INSERT INTO election_groups DEFAULT VALUES
+                 RETURNING group_id`
+            );
+            groupId = newGroup[0].group_id;
+        } else {
+            groupId = groupRows[0].group_id;
         }
 
-        // ✅ is_active بيتحسب تلقائي
         const today = new Date();
-        const start = new Date(start_date);
-        const end = new Date(end_date);
-        const isActive = today >= start && today <= end;
+        const isActive = today >= new Date(start_date) && today <= new Date(end_date);
 
         let logoUrl = null;
         if (logo_url) {
@@ -65,12 +76,12 @@ exports.createElection = async (req, res) => {
         const { rows } = await pool.query(
             `INSERT INTO elections 
              (election_type, election_name, governorate, logo_url, 
-              start_date, end_date, is_active)
-             VALUES ($1, $2, $3, $4, $5, $6, $7)
+              start_date, end_date, is_active, election_group_id)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
              RETURNING *`,
             [
                 election_type, election_name, governorate,
-                logoUrl, start_date, end_date, isActive
+                logoUrl, start_date, end_date, isActive, groupId
             ]
         );
 

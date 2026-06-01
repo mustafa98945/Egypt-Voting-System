@@ -220,16 +220,17 @@ exports.loginCandidate = async (req, res) => {
             });
         }
 
-        const token = jwt.sign(
-            {
-                id: candidate.candidate_id,
-                national_id: candidate.national_id,
-                role: 'candidate',
-                administrative_unit: candidate.administrative_unit
-            },
-            process.env.JWT_SECRET,
-            { expiresIn: '24h' }
-        );
+       const token = jwt.sign(
+    {
+        id: candidate.candidate_id,
+        national_id: candidate.national_id,
+        role: 'candidate',
+        administrative_unit: candidate.administrative_unit,
+        governorate: candidate.governorate  // ← جديد
+    },
+    process.env.JWT_SECRET,
+    { expiresIn: '24h' }
+);
 
         res.json({
             success: true,
@@ -252,6 +253,7 @@ exports.loginCandidate = async (req, res) => {
 exports.listCandidates = async (req, res) => {
     try {
         const userUnit = req.user.administrative_unit;
+        const userGov = req.user.governorate; // ← محتاج تضيفه في التوكن
 
         if (!userUnit) {
             return res.status(400).json({
@@ -260,9 +262,9 @@ exports.listCandidates = async (req, res) => {
             });
         }
 
-        // ✅ التحقق من حالة الانتخابات الأول
+        // ✅ التحقق من حالة الانتخابات للمحافظة دي
         const { rows: electionRows } = await pool.query(
-            `SELECT 
+            `SELECT *,
                 CASE 
                     WHEN CURRENT_DATE < start_date THEN 'not_started'
                     WHEN CURRENT_DATE BETWEEN start_date AND end_date THEN 'active'
@@ -270,29 +272,32 @@ exports.listCandidates = async (req, res) => {
                 END AS status
              FROM elections
              WHERE is_active = TRUE
+             AND (
+                 TRIM(governorate) = TRIM($1)
+                 OR governorate IS NULL
+             )
              ORDER BY created_at DESC
-             LIMIT 1`
+             LIMIT 1`,
+            [userGov || '']
         );
 
-        // لو مفيش انتخابات
         if (electionRows.length === 0) {
             return res.status(403).json({
                 success: false,
-                message: "لا توجد انتخابات حالياً"
+                message: "لا توجد انتخابات لمحافظتك حالياً"
             });
         }
 
-        // لو الانتخابات مش active
         if (electionRows[0].status !== 'active') {
             return res.status(403).json({
                 success: false,
-                message: electionRows[0].status === 'not_started' 
-                    ? "الانتخابات لم تبدأ بعد"
-                    : "انتهت فترة الانتخابات"
+                message: electionRows[0].status === 'not_started'
+                    ? `الانتخابات لم تبدأ بعد - تبدأ في ${electionRows[0].start_date}`
+                    : "انتهت فترة الانتخابات لمحافظتك"
             });
         }
 
-        // ✅ لو active → ارجع المرشحين
+        // ✅ جيب المرشحين المقبولين في نفس الـ administrative_unit
         const query = `
             SELECT 
                 c.candidate_id,

@@ -85,56 +85,56 @@ exports.getVoteCard = async (req, res) => {
 // --- 4. نتائج الانتخابات (كل المرشحين بأصواتهم وصورهم) ---
 exports.getResults = async (req, res) => {
     try {
-        const { rows: electionRows } = await pool.query(
-            `SELECT 
-                result_status,
-                CASE 
-                    WHEN CURRENT_DATE < start_date THEN 'not_started'
-                    WHEN CURRENT_DATE BETWEEN start_date AND end_date THEN 'active'
-                    WHEN CURRENT_DATE > end_date THEN 'ended'
-                END AS status
-             FROM elections
-             WHERE is_active = TRUE
-             ORDER BY created_at DESC
+
+        // ✅ جيب آخر group اتعمله approved
+        const { rows: groupRows } = await pool.query(
+            `SELECT DISTINCT eg.group_id
+             FROM election_groups eg
+             JOIN elections e 
+               ON e.election_group_id = eg.group_id
+             WHERE e.result_status = 'approved'
+             ORDER BY eg.created_at DESC
              LIMIT 1`
         );
 
-        if (electionRows.length === 0) {
-            return res.status(403).json({
-                success: false,
-                message: "لا توجد انتخابات حالياً"
-            });
-        }
-
-        const election = electionRows[0];
-
-        // ✅ لو الانتخابات لسه شغالة
-        if (election.status !== 'ended') {
-            return res.status(403).json({
-                success: false,
-                message: "النتائج ستظهر بعد انتهاء فترة التصويت"
-            });
-        }
-
-        // ✅ لو الانتخابات خلصت بس مش معتمدة
-        if (election.result_status === null) {
+        if (groupRows.length === 0) {
             return res.status(403).json({
                 success: false,
                 message: "النتائج قيد المراجعة من قِبل اللجنة الانتخابية"
             });
         }
 
-        // ✅ لو الانتخابات باطلة
-        if (election.result_status === 'refused') {
-            return res.status(403).json({
-                success: false,
-                message: "تم إبطال نتيجة الانتخابات من قِبل اللجنة الانتخابية"
-            });
-        }
+        const groupId = groupRows[0].group_id;
 
-        // ✅ لو معتمدة → ارجع النتايج
-        const userUnit = req.user.administrative_unit;
+        // ✅ إجمالي عدد الأصوات في الدورة
+        const { rows: totalVotesRows } = await pool.query(
+            `SELECT COUNT(v.vote_id)::INT AS total_votes
+             FROM votes v
+             JOIN elections e 
+               ON v.election_id = e.election_id
+             WHERE e.election_group_id = $1`,
+            [groupId]
+        );
 
+        const totalVotes = totalVotesRows[0].total_votes || 0;
+
+        // ✅ عدد المرشحين
+        const { rows: candidatesCountRows } = await pool.query(
+            `SELECT COUNT(DISTINCT c.candidate_id)::INT AS total_candidates
+             FROM candidates c
+             JOIN votes v 
+               ON c.candidate_id = v.candidate_id
+             JOIN elections e 
+               ON v.election_id = e.election_id
+             WHERE 
+               c.is_approved = TRUE
+               AND e.election_group_id = $1`,
+            [groupId]
+        );
+
+        const totalCandidates = candidatesCountRows[0].total_candidates || 0;
+
+        // ✅ النتائج مجمعة + نسبة التصويت
         const { rows } = await pool.query(
             `SELECT 
                 c.candidate_id,
@@ -142,30 +142,59 @@ exports.getResults = async (req, res) => {
                 c.personal_photos_url,
                 c.candidate_type,
                 c.election_symbol_url,
-                COUNT(v.vote_id)::INT AS total_votes
+                cr.administrative_unit,
+                cr.governorate,
+                COUNT(v.vote_id)::INT AS total_votes,
+                ROUND(
+                    (COUNT(v.vote_id) * 100.0) / NULLIF($2, 0),
+                    2
+                ) AS percentage
             FROM candidates c
-            LEFT JOIN civil_registry cr ON TRIM(c.national_id) = TRIM(cr.national_id)
-            LEFT JOIN votes v ON c.candidate_id = v.candidate_id
-            WHERE TRIM(cr.administrative_unit) = TRIM($1)
-            AND c.is_approved = TRUE
+            LEFT JOIN civil_registry cr 
+              ON TRIM(c.national_id) = TRIM(cr.national_id)
+            LEFT JOIN votes v 
+              ON c.candidate_id = v.candidate_id
+            LEFT JOIN elections e 
+              ON v.election_id = e.election_id
+            WHERE 
+                c.is_approved = TRUE
+                AND e.election_group_id = $1
             GROUP BY 
-                c.candidate_id, cr.full_name, c.personal_photos_url,
-                c.candidate_type, c.election_symbol_url
+                c.candidate_id, 
+                cr.full_name, 
+                c.personal_photos_url,
+                c.candidate_type, 
+                c.election_symbol_url,
+                cr.administrative_unit, 
+                cr.governorate
             ORDER BY total_votes DESC`,
-            [userUnit]
+            [groupId, totalVotes]
         );
+
+        // ✅ تحديد الفائز (أول واحد بعد الترتيب)
+        const winner = rows.length > 0 ? rows[0] : null;
 
         res.json({
             success: true,
-            administrative_unit: userUnit,
+            group_id: groupId,
+            summary: {
+                total_votes: totalVotes,
+                total_candidates: totalCandidates,
+                winner: winner ? {
+                    candidate_id: winner.candidate_id,
+                    full_name: winner.full_name,
+                    total_votes: winner.total_votes,
+                    percentage: winner.percentage
+                } : null
+            },
             data: rows
         });
 
     } catch (err) {
         console.error("Results Error:", err.message);
-        res.status(500).json({ 
-            success: false, 
-            message: "خطأ في جلب النتائج" 
+        res.status(500).json({
+            success: false,
+            message: "خطأ في جلب النتائج"
         });
     }
 };
