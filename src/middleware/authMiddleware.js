@@ -24,12 +24,13 @@ const authMiddleware = (req, res, next) => {
             });
         }
 
-        // ✅ تمرير البيانات للـ Controllers
+        // ✅ تمرير البيانات كاملة للـ Controllers
         req.user = {
             id: decoded.id,
             role: decoded.role,
             national_id: decoded.national_id || null,
-            administrative_unit: decoded.administrative_unit || null
+            administrative_unit: decoded.administrative_unit || null,
+            governorate: decoded.governorate || null   // ✅ تمت الإضافة هنا
         };
 
         next();
