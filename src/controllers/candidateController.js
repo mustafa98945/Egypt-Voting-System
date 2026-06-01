@@ -98,16 +98,50 @@ exports.registerCandidate = async (req, res) => {
             });
         }
 
+        // ✅ حساب العمر من السجل المدني
+        const birthDate = new Date(citizen.birth_date);
+        const today = new Date();
+
+        let age = today.getFullYear() - birthDate.getFullYear();
+        const monthDiff = today.getMonth() - birthDate.getMonth();
+
+        if (
+            monthDiff < 0 ||
+            (monthDiff === 0 && today.getDate() < birthDate.getDate())
+        ) {
+            age--;
+        }
+
+        // ✅ تحديد الحد الأدنى للعمر حسب نوع الانتخابات
+        let minimumAge = 25; // افتراضي
+
+        if (data.candidate_type === "Senate") {
+            minimumAge = 30;
+        } else if (data.candidate_type === "Presidential") {
+            minimumAge = 40;
+        } else if (data.candidate_type === "People Assembly") {
+            minimumAge = 25;
+        } else if (data.candidate_type === "Local") {
+            minimumAge = 21;
+        }
+
+        if (age < minimumAge) {
+            return res.status(400).json({
+                success: false,
+                message: `يجب أن يكون العمر ${minimumAge} سنة على الأقل لهذا النوع من الانتخابات`
+            });
+        }
+
         const hashedPassword = await bcrypt.hash(data.password, 10);
 
-        // ✅ رفع الصور على Supabase الأول
+        // ✅ رفع الصور على Supabase
         const uploadFile = async (fileData, fieldName, folder) => {
             if (!fileData) return null;
-            // لو URL جاهز خده زي ما هو
+
             if (typeof fileData === 'string' && fileData.startsWith('http')) {
                 return fileData;
             }
-            // لو base64 ارفعه
+
             const fileName = `${fieldName}_${data.national_id}_${Date.now()}.jpg`;
             return await processBase64AndUpload(fileData, fileName, folder);
         };
@@ -136,11 +170,11 @@ exports.registerCandidate = async (req, res) => {
             occupation: data.occupation,
             candidate_type: data.candidate_type,
             short_bio: data.short_bio,
-            election_symbol_url,       // ✅ URL بعد الرفع
-            personal_photos_url,       // ✅ URL بعد الرفع
-            financial_disclosure_url,  // ✅ URL بعد الرفع
-            fitness_health_url,        // ✅ URL بعد الرفع
-            deposit_receipt_url        // ✅ URL بعد الرفع
+            election_symbol_url,
+            personal_photos_url,
+            financial_disclosure_url,
+            fitness_health_url,
+            deposit_receipt_url
         });
 
         res.status(201).json({
@@ -151,7 +185,10 @@ exports.registerCandidate = async (req, res) => {
 
     } catch (err) {
         console.error("Register Error:", err);
-        res.status(500).json({ success: false, message: err.message });
+        res.status(500).json({
+            success: false,
+            message: err.message
+        });
     }
 };
 ////////////////////////////////////////////////////////////
