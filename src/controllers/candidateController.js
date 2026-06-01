@@ -98,7 +98,7 @@ exports.registerCandidate = async (req, res) => {
             });
         }
 
-        // ✅ حساب العمر من السجل المدني
+        // ✅ حساب العمر من بيانات السجل المدني
         const birthDate = new Date(citizen.birth_date);
         const today = new Date();
 
@@ -112,29 +112,17 @@ exports.registerCandidate = async (req, res) => {
             age--;
         }
 
-        // ✅ تحديد الحد الأدنى للعمر حسب نوع الانتخابات
-        let minimumAge = 25; // افتراضي
-
-        if (data.candidate_type === "Senate") {
-            minimumAge = 30;
-        } else if (data.candidate_type === "Presidential") {
-            minimumAge = 40;
-        } else if (data.candidate_type === "People Assembly") {
-            minimumAge = 25;
-        } else if (data.candidate_type === "Local") {
-            minimumAge = 21;
-        }
-
-        if (age < minimumAge) {
+        // ✅ شرط 18 سنة فقط
+        if (age < 18) {
             return res.status(400).json({
                 success: false,
-                message: `يجب أن يكون العمر ${minimumAge} سنة على الأقل لهذا النوع من الانتخابات`
+                message: "يجب أن يكون العمر 18 سنة أو أكثر للتسجيل"
             });
         }
 
         const hashedPassword = await bcrypt.hash(data.password, 10);
 
-        // ✅ رفع الصور على Supabase
+        // ✅ رفع الصور
         const uploadFile = async (fileData, fieldName, folder) => {
             if (!fileData) return null;
 
