@@ -110,9 +110,6 @@ exports.createElection = async (req, res) => {
         res.status(500).json({ success: false, message: err.message });
     }
 };
-
-
-
 // ===============================
 // ✅ 2. تعديل انتخابات
 // ===============================
@@ -296,5 +293,29 @@ exports.deleteElection = async (req, res) => {
 
     } catch (err) {
         res.status(500).json({ success: false, message: err.message });
+    }
+};
+
+// ✅ جلب كل المحافظات (Dropdown)
+exports.getGovernorates = async (req, res) => {
+    try {
+        const { rows } = await pool.query(
+            `SELECT governorate_id, governorate_name
+             FROM governorates
+             ORDER BY governorate_name ASC`
+        );
+
+        res.json({
+            success: true,
+            count: rows.length,
+            data: rows
+        });
+
+    } catch (err) {
+        console.error("Get Governorates Error:", err.message);
+        res.status(500).json({
+            success: false,
+            message: "حدث خطأ أثناء جلب المحافظات"
+        });
     }
 };
