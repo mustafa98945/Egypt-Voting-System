@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const adminController = require('../controllers/adminController');
 const adminMiddleware = require('../middleware/adminMiddleware');
+const electionController = require('../controllers/electionController');
 
 // بدون توكن
 router.post('/login', adminController.login);
