@@ -32,7 +32,7 @@ router.get('/election/results', adminMiddleware, adminController.getElectionResu
 router.put(
     '/group/:groupId/decision',
     adminMiddleware,
-    electionController.decideElectionGroup
+    adminController.decideElectionGroup   // ✅ عدل هنا
 );
 
 // ✅ الـ specific routes الأول
