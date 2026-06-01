@@ -287,7 +287,7 @@ exports.listCandidates = async (req, res) => {
             });
         }
 
-        // ✅ تحقق إن في انتخابات شغالة بالساعة للمحافظة دي
+        // ✅ تحقق إن في انتخابات شغالة للمحافظة
         const { rows: electionRows } = await pool.query(
             `SELECT election_id
              FROM elections
@@ -307,7 +307,7 @@ exports.listCandidates = async (req, res) => {
             });
         }
 
-        // ✅ جيب المرشحين المقبولين في نفس الوحدة الإدارية
+        // ✅ جلب المرشحين مع التأكد إن الدائرة تبع نفس المحافظة
         const { rows } = await pool.query(
             `SELECT 
                 c.candidate_id,
@@ -321,10 +321,13 @@ exports.listCandidates = async (req, res) => {
              FROM candidates c
              JOIN civil_registry cr
                ON TRIM(c.national_id) = TRIM(cr.national_id)
+             JOIN electoral_districts ed
+               ON TRIM(cr.administrative_unit) = TRIM(ed.district_name)
              WHERE TRIM(cr.administrative_unit) = TRIM($1)
+             AND TRIM(ed.governorate) = TRIM($2)
              AND c.is_approved = TRUE
              ORDER BY c.created_at DESC`,
-            [userUnit]
+            [userUnit, userGov]
         );
 
         res.json({
