@@ -668,7 +668,6 @@ exports.getElectionResults = async (req, res) => {
 // --- 2. اعتماد أو إبطال النتيجة ---
 exports.decideElectionGroup = async (req, res) => {
     try {
-        const { groupId } = req.params;
         const { decision } = req.body;
 
         if (!decision || !['approved', 'refused'].includes(decision)) {
@@ -678,29 +677,34 @@ exports.decideElectionGroup = async (req, res) => {
             });
         }
 
-        // ✅ التأكد إن الجروب موجود
-        const { rows: groupRows } = await queryWithRetry(
-            `SELECT * FROM election_groups WHERE group_id = $1`,
-            [groupId]
+        // ✅ هات آخر group مفتوح
+        const { rows: groupRows } = await pool.query(
+            `SELECT group_id
+             FROM election_groups
+             WHERE is_closed = FALSE
+             ORDER BY created_at DESC
+             LIMIT 1`
         );
 
         if (groupRows.length === 0) {
             return res.status(404).json({
                 success: false,
-                message: "الدورة الانتخابية غير موجودة"
+                message: "لا توجد دورة انتخابية مفتوحة حالياً"
             });
         }
 
-        // ✅ تحديث كل الانتخابات داخل الجروب
-        await queryWithRetry(
+        const groupId = groupRows[0].group_id;
+
+        // ✅ حدّث كل الانتخابات داخل الجروب
+        await pool.query(
             `UPDATE elections
              SET result_status = $1
              WHERE election_group_id = $2`,
             [decision, groupId]
         );
 
-        // ✅ قفل الجروب
-        await queryWithRetry(
+        // ✅ اقفل الجروب
+        await pool.query(
             `UPDATE election_groups
              SET is_closed = TRUE
              WHERE group_id = $1`,
@@ -712,7 +716,7 @@ exports.decideElectionGroup = async (req, res) => {
             message:
                 decision === 'approved'
                     ? "تم اعتماد نتيجة الدورة الانتخابية ✅"
-                    : "تم رفض الدورة الانتخابية ❌ ويمكن بدء انتخابات جديدة الآن"
+                    : "تم رفض الدورة الانتخابية ❌ ويمكن بدء دورة جديدة"
         });
 
     } catch (err) {

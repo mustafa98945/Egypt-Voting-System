@@ -30,9 +30,9 @@ router.get('/voters/status', adminMiddleware, adminController.getVotersStatus);
 
 router.get('/election/results', adminMiddleware, adminController.getElectionResults);
 router.put(
-    '/group/:groupId/decision',
+    '/group/decision',
     adminMiddleware,
-    adminController.decideElectionGroup   // ✅ عدل هنا
+    adminController.decideElectionGroup
 );
 
 // ✅ الـ specific routes الأول
