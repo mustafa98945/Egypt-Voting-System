@@ -119,7 +119,7 @@ exports.getResults = async (req, res) => {
 
         // ✅ جيب آخر group اتعمله approved
         const { rows: groupRows } = await pool.query(
-            `SELECT DISTINCT eg.group_id
+            `SELECT eg.group_id
              FROM election_groups eg
              JOIN elections e 
                ON e.election_group_id = eg.group_id
@@ -176,10 +176,10 @@ exports.getResults = async (req, res) => {
                 cr.administrative_unit,
                 cr.governorate,
                 COUNT(v.vote_id)::INT AS total_votes,
-                ROUND(
-                    (COUNT(v.vote_id) * 100.0) / NULLIF($2, 0),
-                    2
-                ) AS percentage
+                CASE 
+                    WHEN $2 = 0 THEN 0
+                    ELSE ROUND((COUNT(v.vote_id) * 100.0) / $2, 2)
+                END AS percentage
             FROM candidates c
             LEFT JOIN civil_registry cr 
               ON TRIM(c.national_id) = TRIM(cr.national_id)
@@ -202,7 +202,7 @@ exports.getResults = async (req, res) => {
             [groupId, totalVotes]
         );
 
-        // ✅ تحديد الفائز (أول واحد بعد الترتيب)
+        // ✅ تحديد الفائز
         const winner = rows.length > 0 ? rows[0] : null;
 
         res.json({
