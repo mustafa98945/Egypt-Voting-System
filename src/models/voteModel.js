@@ -2,29 +2,43 @@ const { pool } = require('../config/db');
 
 const Vote = {
 
-    // 1. التحقق من حالة التصويت (كما هي)
+    // 1️⃣ التحقق من حالة التصويت
     checkIfVoted: async (tableName, idColumn, userId) => {
         const query = `SELECT has_voted FROM ${tableName} WHERE ${idColumn} = $1`;
         const result = await pool.query(query, [userId]);
         return result.rows.length > 0 ? result.rows[0] : null;
     },
 
-    // 2. تنفيذ التصويت (كما هي)
-    executeVote: async (userRole, userId, candidateId, tableName, idColumn) => {
+    // 2️⃣ تنفيذ التصويت (معدل لإضافة election_id)
+    executeVote: async (
+        userRole,
+        userId,
+        candidateId,
+        tableName,
+        idColumn,
+        electionId   // ✅ أضفناها هنا
+    ) => {
         const client = await pool.connect();
         try {
             await client.query('BEGIN');
+
             await client.query(
-                `INSERT INTO votes (voter_id, candidate_id, voter_role, created_at) 
-                 VALUES ($1, $2, $3, NOW())`,
-                [userId, candidateId, userRole]
+                `INSERT INTO votes 
+                 (voter_id, candidate_id, voter_role, election_id, created_at) 
+                 VALUES ($1, $2, $3, $4, NOW())`,
+                [userId, candidateId, userRole, electionId]  // ✅ هنا
             );
+
             await client.query(
-                `UPDATE ${tableName} SET has_voted = TRUE WHERE ${idColumn} = $1`,
+                `UPDATE ${tableName} 
+                 SET has_voted = TRUE 
+                 WHERE ${idColumn} = $1`,
                 [userId]
             );
+
             await client.query('COMMIT');
             return { success: true };
+
         } catch (error) {
             await client.query('ROLLBACK');
             throw error;
@@ -33,7 +47,7 @@ const Vote = {
         }
     },
 
-    // 3. جلب بيانات الـ Vote Card (معدل لسحب الـ V_code من جدول votes)
+    // 3️⃣ جلب بيانات الـ Vote Card
     getVoteCard: async (userId, role) => {
         if (role === 'voter') {
             const query = `
@@ -44,10 +58,14 @@ const Vote = {
                     cr.governorate         AS "Government",
                     cr.administrative_unit AS "Administrative_Unit"
                 FROM voters v
-                JOIN civil_registry cr ON TRIM(v.national_id) = TRIM(cr.national_id)
-                JOIN votes vt ON v.voter_id = vt.voter_id AND vt.voter_role = 'voter'
+                JOIN civil_registry cr 
+                  ON TRIM(v.national_id) = TRIM(cr.national_id)
+                JOIN votes vt 
+                  ON v.voter_id = vt.voter_id 
+                 AND vt.voter_role = 'voter'
                 WHERE v.voter_id = $1
-                ORDER BY vt.created_at DESC LIMIT 1
+                ORDER BY vt.created_at DESC 
+                LIMIT 1
             `;
             const { rows } = await pool.query(query, [userId]);
             return rows[0];
@@ -60,10 +78,14 @@ const Vote = {
                     cr.governorate         AS "Government",
                     cr.administrative_unit AS "Administrative_Unit"
                 FROM candidates c
-                JOIN civil_registry cr ON TRIM(c.national_id) = TRIM(cr.national_id)
-                JOIN votes vt ON c.candidate_id = vt.voter_id AND vt.voter_role = 'candidate'
+                JOIN civil_registry cr 
+                  ON TRIM(c.national_id) = TRIM(cr.national_id)
+                JOIN votes vt 
+                  ON c.candidate_id = vt.voter_id 
+                 AND vt.voter_role = 'candidate'
                 WHERE c.candidate_id = $1
-                ORDER BY vt.created_at DESC LIMIT 1
+                ORDER BY vt.created_at DESC 
+                LIMIT 1
             `;
             const { rows } = await pool.query(query, [userId]);
             return rows[0];

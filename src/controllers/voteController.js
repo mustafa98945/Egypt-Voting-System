@@ -4,30 +4,61 @@ const { pool } = require('../config/db');
 // --- 1. تنفيذ التصويت ---
 exports.castVote = async (req, res) => {
     try {
-        const { id, role } = req.user;
+        const { id, role, governorate } = req.user;
         const { candidate_id } = req.body;
 
         if (!candidate_id) {
             return res.status(400).json({
-                success: false, message: "يرجى اختيار مرشح للتصويت له"
+                success: false,
+                message: "يرجى اختيار مرشح للتصويت له"
             });
         }
+
+        // ✅ 1. التحقق من وجود انتخابات نشطة بالساعة
+        const { rows: electionRows } = await pool.query(
+            `SELECT election_id
+             FROM elections
+             WHERE is_active = TRUE
+             AND TRIM(governorate) = TRIM($1)
+             AND CURRENT_TIMESTAMP >= start_date
+             AND CURRENT_TIMESTAMP <= end_date
+             ORDER BY created_at DESC
+             LIMIT 1`,
+            [governorate]
+        );
+
+        if (electionRows.length === 0) {
+            return res.status(403).json({
+                success: false,
+                message: "لا توجد انتخابات نشطة حالياً"
+            });
+        }
+
+        const electionId = electionRows[0].election_id;
 
         const tableName = role === 'candidate' ? 'candidates' : 'voters';
         const idColumn = role === 'candidate' ? 'candidate_id' : 'voter_id';
 
-        // التحقق من التصويت المسبق
+        // ✅ 2. التحقق من التصويت المسبق
         const status = await Vote.checkIfVoted(tableName, idColumn, id);
         if (status && status.has_voted) {
             return res.status(400).json({
-                success: false, message: "عذراً، لقد قمت بالتصويت بالفعل سابقاً"
+                success: false,
+                message: "عذراً، لقد قمت بالتصويت بالفعل سابقاً"
             });
         }
 
-        // تنفيذ التصويت
-        await Vote.executeVote(role, id, candidate_id, tableName, idColumn);
+        // ✅ 3. تنفيذ التصويت (مع تمرير electionId)
+        await Vote.executeVote(
+            role,
+            id,
+            candidate_id,
+            tableName,
+            idColumn,
+            electionId   // ✅ أضفناها هنا
+        );
 
-        // جلب بيانات الـ Vote Card
+        // ✅ 4. جلب بيانات الـ Vote Card
         const voteCard = await Vote.getVoteCard(id, role);
 
         res.status(200).json({
@@ -39,11 +70,11 @@ exports.castVote = async (req, res) => {
     } catch (err) {
         console.error("Cast Vote Error:", err.message);
         res.status(500).json({
-            success: false, message: "حدث خطأ داخلي أثناء تسجيل الصوت"
+            success: false,
+            message: "حدث خطأ داخلي أثناء تسجيل الصوت"
         });
     }
 };
-
 // --- 2. التحقق من حالة التصويت ---
 exports.checkUserVotingStatus = async (req, res) => {
     try {
