@@ -666,9 +666,9 @@ exports.getElectionResults = async (req, res) => {
 };
 
 // --- 2. اعتماد أو إبطال النتيجة ---
-exports.decideElectionResult = async (req, res) => {
+exports.decideElectionGroup = async (req, res) => {
     try {
-        const { id } = req.params;
+        const { groupId } = req.params;
         const { decision } = req.body;
 
         if (!decision || !['approved', 'refused'].includes(decision)) {
@@ -678,27 +678,51 @@ exports.decideElectionResult = async (req, res) => {
             });
         }
 
-        const { rows } = await queryWithRetry(
-            `UPDATE elections 
+        // ✅ التأكد إن الجروب موجود
+        const { rows: groupRows } = await queryWithRetry(
+            `SELECT * FROM election_groups WHERE group_id = $1`,
+            [groupId]
+        );
+
+        if (groupRows.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: "الدورة الانتخابية غير موجودة"
+            });
+        }
+
+        // ✅ تحديث كل الانتخابات داخل الجروب
+        await queryWithRetry(
+            `UPDATE elections
              SET result_status = $1
-             WHERE election_id = $2
-             RETURNING *`,
-            [decision, id]
+             WHERE election_group_id = $2`,
+            [decision, groupId]
+        );
+
+        // ✅ قفل الجروب
+        await queryWithRetry(
+            `UPDATE election_groups
+             SET is_closed = TRUE
+             WHERE group_id = $1`,
+            [groupId]
         );
 
         res.json({
             success: true,
-            message: decision === 'approved' 
-                ? "تم اعتماد نتيجة الانتخابات بنجاح ✅" 
-                : "تم إبطال الانتخابات ❌",
-            data: rows[0]
+            message:
+                decision === 'approved'
+                    ? "تم اعتماد نتيجة الدورة الانتخابية ✅"
+                    : "تم رفض الدورة الانتخابية ❌ ويمكن بدء انتخابات جديدة الآن"
         });
 
     } catch (err) {
-        res.status(500).json({ success: false, message: err.message });
+        console.error("Decision Error:", err.message);
+        res.status(500).json({
+            success: false,
+            message: "حدث خطأ أثناء تحديث حالة الدورة"
+        });
     }
 };
-
 exports.getVotesData = async (req, res) => {
     try {
         const { rows } = await queryWithRetry(

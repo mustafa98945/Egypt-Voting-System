@@ -28,7 +28,11 @@ router.get('/votes', adminMiddleware, adminController.getVotesData);
 router.get('/voters/status', adminMiddleware, adminController.getVotersStatus);
 
 router.get('/election/results', adminMiddleware, adminController.getElectionResults);
-router.put('/election/results/:id/decision', adminMiddleware, adminController.decideElectionResult);
+router.put(
+    '/group/:groupId/decision',
+    adminMiddleware,
+    electionController.decideElectionGroup
+);
 
 // ✅ الـ specific routes الأول
 router.get('/candidates/pending', adminMiddleware, adminController.getPendingCandidates);
