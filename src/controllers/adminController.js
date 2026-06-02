@@ -439,12 +439,32 @@ exports.getDashboardStats = async (req, res) => {
     try {
         const { rows } = await queryWithRetry(
             `SELECT 
-                (SELECT COUNT(*) FROM voters) AS total_voters,
-                (SELECT COUNT(*) FROM candidates WHERE is_approved = TRUE) AS total_candidates,
-                (SELECT COUNT(*) FROM votes) AS total_voted,
-                (SELECT COUNT(*) FROM voters WHERE has_voted = TRUE) +
-                (SELECT COUNT(*) FROM candidates WHERE has_voted = TRUE) AS total_completed
-             `
+                -- ✅ كل المواطنين 18+ من السجل المدني
+                (
+                    SELECT COUNT(*)
+                    FROM civil_registry
+                    WHERE DATE_PART('year', AGE(CURRENT_DATE, birth_date)) >= 18
+                ) AS total_voters,
+
+                -- ✅ المرشحين المقبولين فقط
+                (
+                    SELECT COUNT(*)
+                    FROM candidates
+                    WHERE is_approved = TRUE
+                ) AS total_candidates,
+
+                -- ✅ إجمالي الأصوات المسجلة
+                (
+                    SELECT COUNT(*)
+                    FROM votes
+                ) AS total_voted,
+
+                -- ✅ عدد اللي صوتوا فعليًا (من votes)
+                (
+                    SELECT COUNT(DISTINCT voter_id)
+                    FROM votes
+                ) AS total_completed
+            `
         );
 
         res.json({
@@ -461,7 +481,6 @@ exports.getDashboardStats = async (req, res) => {
         res.status(500).json({ success: false, message: err.message });
     }
 };
-
 exports.getElectoralDistricts = async (req, res) => {
     try {
         const { rows } = await queryWithRetry(
