@@ -451,19 +451,7 @@ exports.getDashboardStats = async (req, res) => {
                     SELECT COUNT(*)
                     FROM candidates
                     WHERE is_approved = TRUE
-                ) AS total_candidates,
-
-                -- ✅ إجمالي الأصوات المسجلة
-                (
-                    SELECT COUNT(*)
-                    FROM votes
-                ) AS total_voted,
-
-                -- ✅ عدد اللي صوتوا فعليًا (من votes)
-                (
-                    SELECT COUNT(DISTINCT voter_id)
-                    FROM votes
-                ) AS total_completed
+                ) AS total_candidates
             `
         );
 
@@ -471,9 +459,7 @@ exports.getDashboardStats = async (req, res) => {
             success: true,
             data: {
                 voters: rows[0].total_voters,
-                candidates: rows[0].total_candidates,
-                completed: rows[0].total_completed,
-                total_votes: rows[0].total_voted
+                candidates: rows[0].total_candidates
             }
         });
 
