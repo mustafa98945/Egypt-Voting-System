@@ -33,9 +33,16 @@ const processBase64AndUpload = async (base64String, fileName, folder = 'voters_c
 ////////////////////////////////////////////////////////////
 // ✅ VERIFY
 ////////////////////////////////////////////////////////////
+const bcrypt = require('bcrypt');
+const Voter = require('../models/voterModel');
+const { processBase64AndUpload } = require('../utils/uploadHelper');
+
+////////////////////////////////////////////////////////////
+// ✅ VERIFY BEFORE REGISTER
+////////////////////////////////////////////////////////////
 exports.verifyBeforeRegister = async (req, res) => {
     try {
-        const { national_id, birth_date, expiry_date, email } = req.body;
+        const { national_id, birth_date, expiry_date } = req.body;
 
         const citizen = await Voter.verifyInRegistry(
             national_id,
@@ -50,18 +57,35 @@ exports.verifyBeforeRegister = async (req, res) => {
             });
         }
 
-        res.json({
+        // ✅ شرط السن من DB
+        if (citizen.age < 18) {
+            return res.status(400).json({
+                success: false,
+                message: "يجب أن يكون عمرك 18 سنة أو أكثر للتسجيل"
+            });
+        }
+
+        return res.json({
             success: true,
-            data: citizen
+            data: {
+                full_name: citizen.full_name,
+                address: citizen.address,
+                governorate: citizen.governorate,
+                administrative_unit: citizen.administrative_unit,
+                age: citizen.age
+            }
         });
 
     } catch (err) {
-        res.status(500).json({ success: false, message: err.message });
+        return res.status(500).json({
+            success: false,
+            message: err.message
+        });
     }
 };
 
 ////////////////////////////////////////////////////////////
-// ✅ REGISTER
+// ✅ REGISTER VOTER
 ////////////////////////////////////////////////////////////
 exports.registerVoter = async (req, res) => {
     try {
@@ -80,20 +104,13 @@ exports.registerVoter = async (req, res) => {
             });
         }
 
-const birthDate = new Date(citizen.birth_date);
-const today = new Date();
-let age = today.getFullYear() - birthDate.getFullYear();
-const monthDiff = today.getMonth() - birthDate.getMonth();
-if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
-    age--;
-}
-
-if (age < 18) {
-    return res.status(400).json({
-        success: false,
-        message: "يجب أن يكون عمرك 18 سنة أو أكثر للتسجيل"
-    });
-}
+        // ✅ شرط السن من DB
+        if (citizen.age < 18) {
+            return res.status(400).json({
+                success: false,
+                message: "يجب أن يكون عمرك 18 سنة أو أكثر للتسجيل"
+            });
+        }
 
         let partyCardUrl = null;
 
@@ -114,7 +131,7 @@ if (age < 18) {
             party_card_url: partyCardUrl
         });
 
-        res.status(201).json({
+        return res.status(201).json({
             success: true,
             data: {
                 voter_id: newVoter.voter_id,
@@ -123,10 +140,12 @@ if (age < 18) {
         });
 
     } catch (err) {
-        res.status(500).json({ success: false, message: err.message });
+        return res.status(500).json({
+            success: false,
+            message: err.message
+        });
     }
 };
-
 ////////////////////////////////////////////////////////////
 // ✅ LOGIN
 ////////////////////////////////////////////////////////////
