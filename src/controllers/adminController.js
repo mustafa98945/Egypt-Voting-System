@@ -314,7 +314,7 @@ exports.getCandidateDetails = async (req, res) => {
                 cr.address,
                 cr.administrative_unit,
                 cr.degree,
-                cr.age,
+                DATE_PART('year', AGE(CURRENT_DATE, cr.birth_date))::INT AS age,
                 cr.gender,
                 cr.military_service_url,
                 cr.education_qualification_url,
