@@ -439,14 +439,13 @@ exports.getDashboardStats = async (req, res) => {
     try {
         const { rows } = await queryWithRetry(
             `SELECT 
-                -- ✅ كل المواطنين 18+ من السجل المدني
+                -- ✅ عدد المشاركين في التصويت (voters + candidates)
                 (
-                    SELECT COUNT(*)
-                    FROM civil_registry
-                    WHERE DATE_PART('year', AGE(CURRENT_DATE, birth_date)) >= 18
+                    SELECT COUNT(DISTINCT voter_id)
+                    FROM votes
                 ) AS total_voters,
 
-                -- ✅ المرشحين المقبولين فقط
+                -- ✅ عدد المرشحين المقبولين
                 (
                     SELECT COUNT(*)
                     FROM candidates
