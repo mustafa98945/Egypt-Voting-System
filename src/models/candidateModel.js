@@ -2,10 +2,25 @@ const { pool } = require('../config/db');
 
 class Candidate {
 
-    // 1. التحقق من السجل المدني
+    ////////////////////////////////////////////////////////////
+    // ✅ 1. التحقق من السجل المدني + حساب العمر من DB
+    ////////////////////////////////////////////////////////////
     static async verifyRegistry(nationalId, birthDate, expiryDate) {
         const query = `
-            SELECT *
+            SELECT 
+                national_id,
+                full_name,
+                birth_date,
+                governorate,
+                address,
+                administrative_unit,
+                degree,
+                gender,
+                military_service_url,
+                education_qualification_url,
+                birth_certificate_url,
+                criminal_record_url,
+                DATE_PART('year', AGE(CURRENT_DATE, birth_date))::INT AS age
             FROM civil_registry 
             WHERE TRIM(national_id) = TRIM($1)
               AND birth_date = $2::date
@@ -16,7 +31,9 @@ class Candidate {
         return rows[0];
     }
 
-    // 2. إنشاء مرشح
+    ////////////////////////////////////////////////////////////
+    // ✅ 2. إنشاء مرشح
+    ////////////////////////////////////////////////////////////
     static async create(data) {
         const query = `
             INSERT INTO candidates (
@@ -34,14 +51,15 @@ class Candidate {
                 financial_disclosure_url,
                 fitness_health_url,
                 deposit_receipt_url,
-                 is_approved
+                is_approved
             ) VALUES (
                 $1,$2,$3,$4,$5,$6,$7,$8,$9,
                 $10,$11,$12,$13,$14,
-                 NULL
+                NULL
             )
             RETURNING *
         `;
+
         const values = [
             data.national_id,
             data.birth_date,
@@ -58,11 +76,14 @@ class Candidate {
             data.fitness_health_url,
             data.deposit_receipt_url
         ];
+
         const { rows } = await pool.query(query, values);
         return rows[0];
     }
 
-    // 3. البحث بالرقم القومي
+    ////////////////////////////////////////////////////////////
+    // ✅ 3. البحث بالرقم القومي
+    ////////////////////////////////////////////////////////////
     static async findByNationalId(nationalId) {
         const query = `
             SELECT 
@@ -80,7 +101,9 @@ class Candidate {
         return rows[0];
     }
 
-    // 4. البحث بالبريد الإلكتروني
+    ////////////////////////////////////////////////////////////
+    // ✅ 4. البحث بالبريد الإلكتروني
+    ////////////////////////////////////////////////////////////
     static async findByEmail(email) {
         const query = `
             SELECT 
@@ -98,7 +121,9 @@ class Candidate {
         return rows[0];
     }
 
-    // 5. Profile Data
+    ////////////////////////////////////////////////////////////
+    // ✅ 5. Profile Data
+    ////////////////////////////////////////////////////////////
     static async findProfileById(candidateId) {
         const query = `
             SELECT 
@@ -121,7 +146,9 @@ class Candidate {
         return rows[0];
     }
 
-    // 6. Public Profile
+    ////////////////////////////////////////////////////////////
+    // ✅ 6. Public Profile
+    ////////////////////////////////////////////////////////////
     static async getFullProfile(candidateId) {
         const query = `
             SELECT 
@@ -144,7 +171,9 @@ class Candidate {
         return rows[0];
     }
 
-    // 7. إجمالي الأصوات
+    ////////////////////////////////////////////////////////////
+    // ✅ 7. إجمالي الأصوات
+    ////////////////////////////////////////////////////////////
     static async getCandidateVotes(candidateId) {
         const query = `
             SELECT COUNT(*)::INT AS total_votes

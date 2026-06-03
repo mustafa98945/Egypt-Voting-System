@@ -32,6 +32,9 @@ const processBase64AndUpload = async (base64String, fileName, folder = 'candidat
 ////////////////////////////////////////////////////////////
 // ✅ VERIFY
 ////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+// ✅ VERIFY BEFORE REGISTER
+////////////////////////////////////////////////////////////
 exports.verifyBeforeRegister = async (req, res) => {
     try {
         const { national_id, birth_date, expiry_date } = req.body;
@@ -49,37 +52,43 @@ exports.verifyBeforeRegister = async (req, res) => {
             });
         }
 
-            const birthDate = new Date(citizen.birth_date);
-const today = new Date();
-let age = today.getFullYear() - birthDate.getFullYear();
-const monthDiff = today.getMonth() - birthDate.getMonth();
-if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
-    age--;
-}
+        // ✅ شرط السن من DB
+        if (citizen.age < 18) {
+            return res.status(400).json({
+                success: false,
+                message: "يجب أن يكون عمرك 18 سنة أو أكثر للتسجيل"
+            });
+        }
 
-if (age < 18) {
-    return res.status(400).json({
-        success: false,
-        message: "يجب أن يكون عمرك 18 سنة أو أكثر للتسجيل"
-    });
-}
-
-        res.json({
+        return res.json({
             success: true,
             data: {
                 full_name: citizen.full_name,
                 governorate: citizen.governorate,
-                administrative_unit: citizen.administrative_unit
+                address: citizen.address,
+                administrative_unit: citizen.administrative_unit,
+                degree: citizen.degree,
+                gender: citizen.gender,
+                age: citizen.age,
+                military_service_url: citizen.military_service_url,
+                education_qualification_url: citizen.education_qualification_url,
+                birth_certificate_url: citizen.birth_certificate_url,
+                criminal_record_url: citizen.criminal_record_url
             }
         });
 
     } catch (err) {
-        res.status(500).json({ success: false, message: err.message });
+        console.error("Verify Error:", err);
+        return res.status(500).json({
+            success: false,
+            message: err.message
+        });
     }
 };
 
+
 ////////////////////////////////////////////////////////////
-// ✅ REGISTER (محتفظ بكل الحقول)
+// ✅ REGISTER CANDIDATE
 ////////////////////////////////////////////////////////////
 exports.registerCandidate = async (req, res) => {
     try {
@@ -98,22 +107,8 @@ exports.registerCandidate = async (req, res) => {
             });
         }
 
-        // ✅ حساب العمر من بيانات السجل المدني
-        const birthDate = new Date(citizen.birth_date);
-        const today = new Date();
-
-        let age = today.getFullYear() - birthDate.getFullYear();
-        const monthDiff = today.getMonth() - birthDate.getMonth();
-
-        if (
-            monthDiff < 0 ||
-            (monthDiff === 0 && today.getDate() < birthDate.getDate())
-        ) {
-            age--;
-        }
-
-        // ✅ شرط 18 سنة فقط
-        if (age < 18) {
+        // ✅ شرط السن من DB
+        if (citizen.age < 18) {
             return res.status(400).json({
                 success: false,
                 message: "يجب أن يكون العمر 18 سنة أو أكثر للتسجيل"
@@ -122,7 +117,6 @@ exports.registerCandidate = async (req, res) => {
 
         const hashedPassword = await bcrypt.hash(data.password, 10);
 
-        // ✅ رفع الصور
         const uploadFile = async (fileData, fieldName, folder) => {
             if (!fileData) return null;
 
@@ -165,7 +159,7 @@ exports.registerCandidate = async (req, res) => {
             deposit_receipt_url
         });
 
-        res.status(201).json({
+        return res.status(201).json({
             success: true,
             message: "تم تسجيل المرشح بنجاح",
             data: { candidate_id: newCandidate.candidate_id }
@@ -173,7 +167,7 @@ exports.registerCandidate = async (req, res) => {
 
     } catch (err) {
         console.error("Register Error:", err);
-        res.status(500).json({
+        return res.status(500).json({
             success: false,
             message: err.message
         });
