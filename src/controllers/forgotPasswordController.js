@@ -98,7 +98,7 @@ exports.sendOTP = async (req, res) => {
         });
 
         const mailOptions = {
-            from: `"Egypt Voting System" <no-reply@egypt-voting.com>`,
+            from: `"Egypt V-System" <mustafamuhamed171@gmail.com>`,
             to: email,
             subject: "Egypt Voting System - Reset Password",
             html: `
