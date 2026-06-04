@@ -5,7 +5,7 @@ const auth = require('../middleware/authMiddleware');
 
 router.post('/verify', candidateController.verifyBeforeRegister);
 router.post('/register', candidateController.registerCandidate);
-router.post('/loginCandidate', candidateController.loginCandidate);
+router.post('/login', candidateController.loginCandidate);
 
 router.get('/list', auth, candidateController.listCandidates);
 router.get('/profile', auth, candidateController.getCandidateProfile);
