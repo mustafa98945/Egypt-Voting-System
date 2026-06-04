@@ -2,63 +2,36 @@ const bcrypt = require("bcrypt");
 const nodemailer = require("nodemailer");
 const { queryWithRetry } = require("../config/db");
 
-//////////////////////////////////////////////////////////
-// ✅ Transporters
-//////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+// ✅ Gmail Transporter (Production Ready)
+////////////////////////////////////////////////////////////
 
-const gmailTransporter = nodemailer.createTransport({
+const transporter = nodemailer.createTransport({
     host: "smtp.gmail.com",
-    port: 465,
-    secure: true,
+    port: 587,
+    secure: false,
+    requireTLS: true,
     auth: {
         user: process.env.EMAIL_USER,
         pass: process.env.EMAIL_PASS
+    },
+    connectionTimeout: 5000,
+    greetingTimeout: 5000,
+    socketTimeout: 5000
+});
+
+// ✅ تأكد إن الاتصال شغال
+transporter.verify((error, success) => {
+    if (error) {
+        console.error("❌ SMTP Error:", error);
+    } else {
+        console.log("✅ Gmail SMTP Ready");
     }
 });
 
-const mailtrapTransporter = nodemailer.createTransport({
-    host: process.env.MAILTRAP_HOST,
-    port: Number(process.env.MAILTRAP_PORT),
-    secure: false,
-    auth: {
-        user: process.env.MAILTRAP_USER,
-        pass: process.env.MAILTRAP_PASS
-    }
-});
-
-//////////////////////////////////////////////////////////
-// ✅ Email Sender with Fallback
-//////////////////////////////////////////////////////////
-
-const sendEmailWithFallback = async (mailOptions) => {
-    let sent = false;
-
-    try {
-        await gmailTransporter.sendMail(mailOptions);
-        console.log("✅ Sent via Gmail");
-        sent = true;
-    } catch (err) {
-        console.log("⚠️ Gmail failed:", err.message);
-    }
-
-    if (!sent) {
-        try {
-            await mailtrapTransporter.sendMail(mailOptions);
-            console.log("✅ Sent via Mailtrap (fallback)");
-            sent = true;
-        } catch (err) {
-            console.log("❌ Mailtrap failed:", err.message);
-        }
-    }
-
-    if (!sent) {
-        throw new Error("All email providers failed");
-    }
-};
-
-//////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
 // ✅ 1️⃣ Send OTP
-//////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
 
 exports.sendOTP = async (req, res) => {
     try {
@@ -103,9 +76,9 @@ exports.sendOTP = async (req, res) => {
         const mailOptions = {
             from: `"Egypt Voting System" <${process.env.EMAIL_USER}>`,
             to: email,
-            subject: "Egypt Voting System - Reset Password",
+            subject: "Reset Password OTP",
             html: `
-                <div style="font-family: Arial; text-align: center;">
+                <div style="font-family: Arial; text-align:center;">
                     <h2>Egypt Voting System</h2>
                     <h1>${otp}</h1>
                     <p>This code expires in 10 minutes.</p>
@@ -113,25 +86,25 @@ exports.sendOTP = async (req, res) => {
             `
         };
 
-        await sendEmailWithFallback(mailOptions);
+        await transporter.sendMail(mailOptions);
 
-        res.json({
+        return res.json({
             success: true,
             message: "تم إرسال رمز التحقق"
         });
 
     } catch (err) {
         console.error("Send OTP Error:", err.message);
-        res.status(500).json({
+        return res.status(500).json({
             success: false,
             message: "فشل إرسال البريد الإلكتروني"
         });
     }
 };
 
-//////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
 // ✅ 2️⃣ Verify OTP
-//////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
 
 exports.verifyOTP = async (req, res) => {
     try {
@@ -163,27 +136,27 @@ exports.verifyOTP = async (req, res) => {
         }
 
         await queryWithRetry(
-            `UPDATE otp_codes SET is_used = TRUE WHERE id = $1`,
+            "UPDATE otp_codes SET is_used = TRUE WHERE id = $1",
             [rows[0].id]
         );
 
-        res.json({
+        return res.json({
             success: true,
             message: "تم التحقق بنجاح"
         });
 
     } catch (err) {
         console.error("Verify OTP Error:", err.message);
-        res.status(500).json({
+        return res.status(500).json({
             success: false,
             message: "حدث خطأ أثناء التحقق"
         });
     }
 };
 
-//////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
 // ✅ 3️⃣ Reset Password
-//////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
 
 exports.resetPassword = async (req, res) => {
     try {
@@ -215,14 +188,14 @@ exports.resetPassword = async (req, res) => {
             [hashedPassword, email]
         );
 
-        res.json({
+        return res.json({
             success: true,
             message: "تم تغيير كلمة المرور بنجاح"
         });
 
     } catch (err) {
         console.error("Reset Password Error:", err.message);
-        res.status(500).json({
+        return res.status(500).json({
             success: false,
             message: "حدث خطأ أثناء تغيير كلمة المرور"
         });
