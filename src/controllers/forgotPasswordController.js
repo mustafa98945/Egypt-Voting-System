@@ -3,52 +3,29 @@ const nodemailer = require('nodemailer');
 const { queryWithRetry } = require('../config/db');
 
 ////////////////////////////////////////////////////////////
-// ✅ Primary Transporter (Brevo)
+// ✅ Gmail Transporter
 ////////////////////////////////////////////////////////////
 
-const primaryTransporter = nodemailer.createTransport({
-    host: "smtp-relay.brevo.com",
-    port: 587,
-    secure: false,
+const transporter = nodemailer.createTransport({
+    service: 'gmail',
     auth: {
-        user: process.env.BREVO_USER,
-        pass: process.env.BREVO_PASS
-    },
-    connectionTimeout: 5000
-});
-
-////////////////////////////////////////////////////////////
-// ✅ Mailtrap Fallback
-////////////////////////////////////////////////////////////
-
-const mailtrapTransporter = nodemailer.createTransport({
-    host: process.env.MAILTRAP_HOST,
-    port: Number(process.env.MAILTRAP_PORT),
-    secure: false,
-    auth: {
-        user: process.env.MAILTRAP_USER,
-        pass: process.env.MAILTRAP_PASS
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS
     }
 });
 
 ////////////////////////////////////////////////////////////
-// ✅ Background Send With Fallback
+// ✅ Background Send
 ////////////////////////////////////////////////////////////
 
 const sendInBackground = (mailOptions) => {
-    primaryTransporter.sendMail(mailOptions)
-        .then(() => console.log("✅ Sent via Primary"))
-        .catch((err) => {
-            console.log("⚠️ Primary failed:", err.message);
-
-            mailtrapTransporter.sendMail(mailOptions)
-                .then(() => console.log("✅ Sent via Mailtrap"))
-                .catch(err2 => console.log("❌ Mailtrap failed:", err2.message));
-        });
+    transporter.sendMail(mailOptions)
+        .then(() => console.log("✅ Email sent via Gmail"))
+        .catch((err) => console.log("❌ Gmail failed:", err.message));
 };
 
 ////////////////////////////////////////////////////////////
-// ✅ 1️⃣ Send OTP (4 DIGITS)
+// ✅ 1️⃣ Send OTP
 ////////////////////////////////////////////////////////////
 
 exports.sendOTP = async (req, res) => {
@@ -79,7 +56,7 @@ exports.sendOTP = async (req, res) => {
             });
         }
 
-        // ✅ OTP 4 أرقام فقط
+        // ✅ OTP 4 أرقام
         const otp = Math.floor(1000 + Math.random() * 9000).toString();
 
         const expiresAt = new Date();
@@ -91,21 +68,25 @@ exports.sendOTP = async (req, res) => {
             [email, otp, expiresAt]
         );
 
-        // ✅ رجّع Response فورًا
+        // ✅ رجّع Response فوراً
         res.json({
             success: true,
-            message: "تم إرسال رمز التحقق"
+            message: "تم إرسال رمز التحقق على بريدك الإلكتروني"
         });
 
+        // ✅ ابعت الـ Email في الـ Background
         const mailOptions = {
-            from: `"Egypt V-System" <mustafamuhamed171@gmail.com>`,
+            from: `"Egypt Voting System" <${process.env.EMAIL_USER}>`,
             to: email,
             subject: "Egypt Voting System - Reset Password",
             html: `
-                <div style="font-family: Arial; text-align: center;">
-                    <h2>Egypt Voting System</h2>
-                    <h1>${otp}</h1>
-                    <p>This code expires in 10 minutes.</p>
+                <div style="font-family: Arial; text-align: center; padding: 20px;">
+                    <h2 style="color: #2563EB;">Egypt Voting System</h2>
+                    <p style="color: #374151;">Your verification code is:</p>
+                    <h1 style="color: #2563EB; font-size: 48px; letter-spacing: 10px;">
+                        ${otp}
+                    </h1>
+                    <p style="color: #6B7280;">This code expires in 10 minutes.</p>
                 </div>
             `
         };
@@ -149,7 +130,7 @@ exports.verifyOTP = async (req, res) => {
         if (rows.length === 0) {
             return res.status(400).json({
                 success: false,
-                message: "الرمز غير صحيح أو منتهي"
+                message: "الرمز غير صحيح أو منتهي الصلاحية"
             });
         }
 
@@ -225,6 +206,7 @@ exports.resetPassword = async (req, res) => {
             success: true,
             message: "تم تغيير كلمة المرور بنجاح"
         });
+
     } catch (err) {
         console.error("Reset Password Error:", err.message);
         return res.status(500).json({
