@@ -673,7 +673,9 @@ exports.decideElectionGroup = async (req, res) => {
             });
         }
 
-        // ✅ هات آخر group مفتوح
+        ////////////////////////////////////////////////////////////
+        // ✅ 1️⃣ هات آخر دورة انتخابية مفتوحة
+        ////////////////////////////////////////////////////////////
         const { rows: groupRows } = await pool.query(
             `SELECT group_id
              FROM election_groups
@@ -691,15 +693,21 @@ exports.decideElectionGroup = async (req, res) => {
 
         const groupId = groupRows[0].group_id;
 
-        // ✅ حدّث كل الانتخابات داخل الجروب
+        ////////////////////////////////////////////////////////////
+        // ✅ 2️⃣ تحديث الانتخابات داخل الجروب
+        // 🔥 أهم تعديل: إيقاف الانتخابات
+        ////////////////////////////////////////////////////////////
         await pool.query(
             `UPDATE elections
-             SET result_status = $1
+             SET result_status = $1,
+                 is_active = FALSE   -- ✅ إيقاف التصويت فوراً
              WHERE election_group_id = $2`,
             [decision, groupId]
         );
 
-        // ✅ اقفل الجروب
+        ////////////////////////////////////////////////////////////
+        // ✅ 3️⃣ إغلاق الجروب
+        ////////////////////////////////////////////////////////////
         await pool.query(
             `UPDATE election_groups
              SET is_closed = TRUE
@@ -707,17 +715,20 @@ exports.decideElectionGroup = async (req, res) => {
             [groupId]
         );
 
-        res.json({
+        ////////////////////////////////////////////////////////////
+        // ✅ 4️⃣ الرد النهائي
+        ////////////////////////////////////////////////////////////
+        return res.json({
             success: true,
             message:
                 decision === 'approved'
-                    ? "تم اعتماد نتيجة الدورة الانتخابية ✅"
-                    : "تم رفض الدورة الانتخابية ❌ ويمكن بدء دورة جديدة"
+                    ? "تم اعتماد نتيجة الدورة الانتخابية ✅ وتم إيقاف التصويت"
+                    : "تم رفض الدورة الانتخابية ❌ وتم إيقاف التصويت"
         });
 
     } catch (err) {
         console.error("Decision Error:", err.message);
-        res.status(500).json({
+        return res.status(500).json({
             success: false,
             message: "حدث خطأ أثناء تحديث حالة الدورة"
         });
