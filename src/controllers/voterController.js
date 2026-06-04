@@ -144,29 +144,46 @@ exports.registerVoter = async (req, res) => {
 exports.login = async (req, res) => {
     try {
         const { email, password, national_id, isFaceAuthenticated } = req.body;
+
         let voter;
 
-        // طريقة 1: Face Recognition بالـ national_id
+        ////////////////////////////////////////////////////////////
+        // ✅ 1️⃣ Login باستخدام Face Recognition
+        ////////////////////////////////////////////////////////////
         if (national_id) {
+
+            if (!isFaceAuthenticated) {
+                return res.status(401).json({
+                    success: false,
+                    message: "فشل التحقق بالوجه"
+                });
+            }
+
             voter = await Voter.findByNationalId(national_id);
-            if (!voter) return res.status(404).json({
-                success: false,
-                message: "الحساب غير موجود"
-            });
         }
-        // طريقة 2: email + password
+
+        ////////////////////////////////////////////////////////////
+        // ✅ 2️⃣ Login باستخدام Email + Password
+        ////////////////////////////////////////////////////////////
         else if (email && password) {
+
             voter = await Voter.findByEmail(email);
-            if (!voter) return res.status(404).json({
-                success: false,
-                message: "الحساب غير موجود"
-            });
-            const isMatch = await bcrypt.compare(password, voter.password);
-            if (!isMatch) return res.status(401).json({
-                success: false,
-                message: "كلمة المرور غير صحيحة"
-            });
+
+            if (voter) {
+                const isMatch = await bcrypt.compare(password, voter.password);
+
+                if (!isMatch) {
+                    return res.status(401).json({
+                        success: false,
+                        message: "كلمة المرور غير صحيحة"
+                    });
+                }
+            }
         }
+
+        ////////////////////////////////////////////////////////////
+        // ✅ مفيش بيانات
+        ////////////////////////////////////////////////////////////
         else {
             return res.status(400).json({
                 success: false,
@@ -174,19 +191,35 @@ exports.login = async (req, res) => {
             });
         }
 
-        const token = jwt.sign(
-    { 
-        id: voter.voter_id,
-        national_id: voter.national_id,
-        role: 'voter',
-        administrative_unit: voter.administrative_unit,
-        governorate: voter.governorate  // ← جديد
-    },
-    process.env.JWT_SECRET,
-    { expiresIn: '24h' }
-);
+        ////////////////////////////////////////////////////////////
+        // ✅ الحساب غير موجود
+        ////////////////////////////////////////////////////////////
+        if (!voter) {
+            return res.status(404).json({
+                success: false,
+                message: "الحساب غير موجود"
+            });
+        }
 
-        res.json({
+        ////////////////////////////////////////////////////////////
+        // ✅ إنشاء التوكن
+        ////////////////////////////////////////////////////////////
+        const token = jwt.sign(
+            {
+                id: voter.voter_id,
+                national_id: voter.national_id,
+                role: 'voter',
+                administrative_unit: voter.administrative_unit,
+                governorate: voter.governorate
+            },
+            process.env.JWT_SECRET,
+            { expiresIn: '24h' }
+        );
+
+        ////////////////////////////////////////////////////////////
+        // ✅ Response
+        ////////////////////////////////////////////////////////////
+        return res.json({
             success: true,
             token,
             user_data: {
@@ -198,7 +231,10 @@ exports.login = async (req, res) => {
         });
 
     } catch (err) {
-        res.status(500).json({ success: false, message: err.message });
+        return res.status(500).json({
+            success: false,
+            message: err.message
+        });
     }
 };
 

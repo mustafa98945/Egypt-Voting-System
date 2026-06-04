@@ -179,79 +179,99 @@ exports.registerCandidate = async (req, res) => {
 exports.loginCandidate = async (req, res) => {
     try {
         const { email, password, national_id, isFaceAuthenticated } = req.body;
+
         let candidate;
 
-        // طريقة 1: Face Recognition بالـ national_id
+        ////////////////////////////////////////////////////////////
+        // ✅ 1️⃣ Login باستخدام Face Recognition
+        ////////////////////////////////////////////////////////////
         if (national_id) {
+
+            if (!isFaceAuthenticated) {
+                return res.status(401).json({
+                    success: false,
+                    message: "فشل التحقق بالوجه"
+                });
+            }
+
             candidate = await Candidate.findByNationalId(national_id);
-            if (!candidate) return res.status(404).json({
-                success: false,
-                message: "الحساب غير موجود"
-            });
-
-            // ✅ التحقق من حالة القبول
-            if (candidate.is_approved === false) {
-                return res.status(403).json({
-                    success: false,
-                    message: "تم رفض طلب ترشحك"
-                });
-            }
-            if (candidate.is_approved === null) {
-                return res.status(403).json({
-                    success: false,
-                    message: "طلبك قيد المراجعة، يرجى الانتظار"
-                });
-            }
         }
-        // طريقة 2: email + password
+
+        ////////////////////////////////////////////////////////////
+        // ✅ 2️⃣ Login باستخدام Email + Password
+        ////////////////////////////////////////////////////////////
         else if (email && password) {
+
             candidate = await Candidate.findByEmail(email);
-            if (!candidate) return res.status(404).json({
-                success: false,
-                message: "الحساب غير موجود"
-            });
 
-            // ✅ التحقق من حالة القبول
-            if (candidate.is_approved === false) {
-                return res.status(403).json({
-                    success: false,
-                    message: "تم رفض طلب ترشحك"
-                });
-            }
-            if (candidate.is_approved === null) {
-                return res.status(403).json({
-                    success: false,
-                    message: "طلبك قيد المراجعة، يرجى الانتظار"
-                });
-            }
+            if (candidate) {
+                const isMatch = await bcrypt.compare(password, candidate.password);
 
-            const isMatch = await bcrypt.compare(password, candidate.password);
-            if (!isMatch) return res.status(401).json({
-                success: false,
-                message: "كلمة المرور غير صحيحة"
-            });
+                if (!isMatch) {
+                    return res.status(401).json({
+                        success: false,
+                        message: "كلمة المرور غير صحيحة"
+                    });
+                }
+            }
         }
-        // مفيش بيانات
+
+        ////////////////////////////////////////////////////////////
+        // ✅ مفيش بيانات
+        ////////////////////////////////////////////////////////////
         else {
             return res.status(400).json({
                 success: false,
-                message: "يرجى إدخال البيانات"
+                message: "يرجى إدخال بيانات الدخول"
             });
         }
 
-       const token = jwt.sign(
-    {
-        id: candidate.candidate_id,
-        national_id: candidate.national_id,
-        role: 'candidate',
-        administrative_unit: candidate.administrative_unit,
-        governorate: candidate.governorate  // ← جديد
-    },
-    process.env.JWT_SECRET,
-    { expiresIn: '24h' }
-);
+        ////////////////////////////////////////////////////////////
+        // ✅ الحساب غير موجود
+        ////////////////////////////////////////////////////////////
+        if (!candidate) {
+            return res.status(404).json({
+                success: false,
+                message: "الحساب غير موجود"
+            });
+        }
 
-        res.json({
+        ////////////////////////////////////////////////////////////
+        // ✅ التحقق من حالة القبول
+        ////////////////////////////////////////////////////////////
+        if (candidate.is_approved === false) {
+            return res.status(403).json({
+                success: false,
+                message: "تم رفض طلب ترشحك"
+            });
+        }
+
+        if (candidate.is_approved === null) {
+            return res.status(403).json({
+                success: false,
+                message: "طلبك قيد المراجعة، يرجى الانتظار"
+            });
+        }
+
+        ////////////////////////////////////////////////////////////
+        // ✅ إنشاء التوكن
+        ////////////////////////////////////////////////////////////
+        const token = jwt.sign(
+            {
+                id: candidate.candidate_id,
+                national_id: candidate.national_id,
+                role: 'candidate',
+                administrative_unit: candidate.administrative_unit,
+                governorate: candidate.governorate
+            },
+            process.env.JWT_SECRET,
+            { expiresIn: '24h' }
+        );
+
+        ////////////////////////////////////////////////////////////
+        // ✅ Response
+        ////////////////////////////////////////////////////////////
+        return res.json({
             success: true,
             token,
             user_data: {
@@ -263,7 +283,10 @@ exports.loginCandidate = async (req, res) => {
         });
 
     } catch (err) {
-        res.status(500).json({ success: false, message: err.message });
+        return res.status(500).json({
+            success: false,
+            message: err.message
+        });
     }
 };
 ////////////////////////////////////////////////////////////
