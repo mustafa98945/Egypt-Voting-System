@@ -143,22 +143,14 @@ exports.registerVoter = async (req, res) => {
 ////////////////////////////////////////////////////////////
 exports.login = async (req, res) => {
     try {
-        const { email, password, national_id, isFaceAuthenticated } = req.body;
+        const { email, password, national_id } = req.body;
 
         let voter;
 
         ////////////////////////////////////////////////////////////
-        // ✅ 1️⃣ Login باستخدام Face Recognition
+        // ✅ 1️⃣ Login باستخدام national_id فقط
         ////////////////////////////////////////////////////////////
         if (national_id) {
-
-            if (!isFaceAuthenticated) {
-                return res.status(401).json({
-                    success: false,
-                    message: "فشل التحقق بالوجه"
-                });
-            }
-
             voter = await Voter.findByNationalId(national_id);
         }
 
