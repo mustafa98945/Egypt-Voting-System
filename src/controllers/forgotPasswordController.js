@@ -3,10 +3,9 @@ const nodemailer = require('nodemailer');
 const { queryWithRetry } = require('../config/db');
 
 ////////////////////////////////////////////////////////////
-// ✅ Primary Transporter (Brevo or Gmail)
+// ✅ Primary Transporter (Brevo)
 ////////////////////////////////////////////////////////////
 
-// ✅ لو هتستخدم Brevo
 const primaryTransporter = nodemailer.createTransport({
     host: "smtp-relay.brevo.com",
     port: 587,
@@ -15,22 +14,8 @@ const primaryTransporter = nodemailer.createTransport({
         user: process.env.BREVO_USER,
         pass: process.env.BREVO_PASS
     },
-    connectionTimeout: 5000,
-    greetingTimeout: 5000,
-    socketTimeout: 5000
-});
-
-/*
-// ✅ لو عايز تستخدم Gmail بدل Brevo
-const primaryTransporter = nodemailer.createTransport({
-    service: 'gmail',
-    auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS
-    },
     connectionTimeout: 5000
 });
-*/
 
 ////////////////////////////////////////////////////////////
 // ✅ Mailtrap Fallback
@@ -47,39 +32,25 @@ const mailtrapTransporter = nodemailer.createTransport({
 });
 
 ////////////////////////////////////////////////////////////
-// ✅ Helper Function: Send With Fallback
+// ✅ Background Send With Fallback (Non‑Blocking)
 ////////////////////////////////////////////////////////////
 
-const sendWithFallback = async (mailOptions) => {
-    let sent = false;
+const sendInBackground = (mailOptions) => {
+    primaryTransporter.sendMail(mailOptions)
+        .then(() => {
+            console.log("✅ Sent via Primary");
+        })
+        .catch((err) => {
+            console.log("⚠️ Primary failed:", err.message);
 
-    // ✅ 1️⃣ Try Primary
-    try {
-        await primaryTransporter.sendMail(mailOptions);
-        console.log("✅ Email sent via Primary provider");
-        sent = true;
-    } catch (err) {
-        console.log("⚠️ Primary failed:", err.message);
-    }
-
-    // ✅ 2️⃣ If failed → Try Mailtrap
-    if (!sent) {
-        try {
-            await mailtrapTransporter.sendMail(mailOptions);
-            console.log("✅ Email sent via Mailtrap (fallback)");
-            sent = true;
-        } catch (err) {
-            console.log("❌ Mailtrap failed:", err.message);
-        }
-    }
-
-    if (!sent) {
-        throw new Error("All email providers failed");
-    }
+            mailtrapTransporter.sendMail(mailOptions)
+                .then(() => console.log("✅ Sent via Mailtrap"))
+                .catch(err2 => console.log("❌ Mailtrap failed:", err2.message));
+        });
 };
 
 ////////////////////////////////////////////////////////////
-// ✅ 1️⃣ Send OTP
+// ✅ 1️⃣ Send OTP (FAST RESPONSE)
 ////////////////////////////////////////////////////////////
 
 exports.sendOTP = async (req, res) => {
@@ -121,10 +92,17 @@ exports.sendOTP = async (req, res) => {
             [email, otp, expiresAt]
         );
 
+        // ✅ رجّع Response فورًا بدون انتظار الإيميل
+        res.json({
+            success: true,
+            message: "تم إرسال رمز التحقق"
+        });
+
+        // ✅ إرسال الإيميل في الخلفية
         const mailOptions = {
-            from: `"Egypt Voting System" <${process.env.EMAIL_USER || 'no-reply@egypt-voting.com'}>`,
+            from: `"Egypt Voting System" <no-reply@egypt-voting.com>`,
             to: email,
-            subject: 'Egypt Voting System - Reset Password',
+            subject: "Egypt Voting System - Reset Password",
             html: `
                 <div style="font-family: Arial; text-align: center;">
                     <h2>Egypt Voting System</h2>
@@ -134,18 +112,13 @@ exports.sendOTP = async (req, res) => {
             `
         };
 
-        await sendWithFallback(mailOptions);
-
-        return res.json({
-            success: true,
-            message: "تم إرسال رمز التحقق"
-        });
+        sendInBackground(mailOptions);
 
     } catch (err) {
         console.error("Send OTP Error:", err.message);
         return res.status(500).json({
             success: false,
-            message: "فشل إرسال البريد الإلكتروني"
+            message: "حدث خطأ أثناء إرسال الرمز"
         });
     }
 };
