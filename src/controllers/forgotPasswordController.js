@@ -1,30 +1,65 @@
-const bcrypt = require('bcrypt');
-const nodemailer = require('nodemailer');
-const { queryWithRetry } = require('../config/db');
+const bcrypt = require("bcrypt");
+const nodemailer = require("nodemailer");
+const { queryWithRetry } = require("../config/db");
 
-// ✅ Gmail Transporter
+//////////////////////////////////////////////////////////
+// ✅ Transporters
+//////////////////////////////////////////////////////////
+
 const gmailTransporter = nodemailer.createTransport({
-    service: 'gmail',
+    host: "smtp.gmail.com",
+    port: 465,
+    secure: true,
     auth: {
         user: process.env.EMAIL_USER,
         pass: process.env.EMAIL_PASS
     }
 });
 
-// ✅ Mailtrap Transporter
 const mailtrapTransporter = nodemailer.createTransport({
     host: process.env.MAILTRAP_HOST,
-    port: process.env.MAILTRAP_PORT,
+    port: Number(process.env.MAILTRAP_PORT),
+    secure: false,
     auth: {
         user: process.env.MAILTRAP_USER,
         pass: process.env.MAILTRAP_PASS
     }
 });
 
+//////////////////////////////////////////////////////////
+// ✅ Email Sender with Fallback
+//////////////////////////////////////////////////////////
 
-// ==============================
-// 1️⃣ Send OTP (Email Only)
-// ==============================
+const sendEmailWithFallback = async (mailOptions) => {
+    let sent = false;
+
+    try {
+        await gmailTransporter.sendMail(mailOptions);
+        console.log("✅ Sent via Gmail");
+        sent = true;
+    } catch (err) {
+        console.log("⚠️ Gmail failed:", err.message);
+    }
+
+    if (!sent) {
+        try {
+            await mailtrapTransporter.sendMail(mailOptions);
+            console.log("✅ Sent via Mailtrap (fallback)");
+            sent = true;
+        } catch (err) {
+            console.log("❌ Mailtrap failed:", err.message);
+        }
+    }
+
+    if (!sent) {
+        throw new Error("All email providers failed");
+    }
+};
+
+//////////////////////////////////////////////////////////
+// ✅ 1️⃣ Send OTP
+//////////////////////////////////////////////////////////
+
 exports.sendOTP = async (req, res) => {
     try {
         const { email } = req.body;
@@ -36,14 +71,14 @@ exports.sendOTP = async (req, res) => {
             });
         }
 
-        // ✅ تأكد إن الإيميل موجود
+        // ✅ تحقق إن الإيميل موجود
         const voter = await queryWithRetry(
-            'SELECT email FROM voters WHERE email = $1',
+            "SELECT email FROM voters WHERE email = $1",
             [email]
         );
 
         const candidate = await queryWithRetry(
-            'SELECT email FROM candidates WHERE email = $1',
+            "SELECT email FROM candidates WHERE email = $1",
             [email]
         );
 
@@ -54,21 +89,21 @@ exports.sendOTP = async (req, res) => {
             });
         }
 
-        const otp = Math.floor(1000 + Math.random() * 9000).toString();
+        const otp = Math.floor(100000 + Math.random() * 900000).toString();
 
         const expiresAt = new Date();
         expiresAt.setMinutes(expiresAt.getMinutes() + 10);
 
         await queryWithRetry(
-            `INSERT INTO otp_codes (email, otp, expires_at)
-             VALUES ($1, $2, $3)`,
+            `INSERT INTO otp_codes (email, otp, expires_at, is_used)
+             VALUES ($1, $2, $3, FALSE)`,
             [email, otp, expiresAt]
         );
 
         const mailOptions = {
-            from: process.env.EMAIL_USER,
+            from: `"Egypt Voting System" <${process.env.EMAIL_USER}>`,
             to: email,
-            subject: 'Egypt Voting System - Reset Password',
+            subject: "Egypt Voting System - Reset Password",
             html: `
                 <div style="font-family: Arial; text-align: center;">
                     <h2>Egypt Voting System</h2>
@@ -78,22 +113,7 @@ exports.sendOTP = async (req, res) => {
             `
         };
 
-        // ✅ Mailtrap (سريع)
-        try {
-            await mailtrapTransporter.sendMail(mailOptions);
-            console.log("✅ Mailtrap email sent");
-        } catch (err) {
-            console.log("⚠️ Mailtrap error:", err.message);
-        }
-
-        // ✅ Gmail (Non‑Blocking)
-        gmailTransporter.sendMail(mailOptions)
-            .then(() => {
-                console.log("✅ Gmail email sent");
-            })
-            .catch((err) => {
-                console.log("❌ Gmail failed:", err.message);
-            });
+        await sendEmailWithFallback(mailOptions);
 
         res.json({
             success: true,
@@ -101,37 +121,38 @@ exports.sendOTP = async (req, res) => {
         });
 
     } catch (err) {
-        console.error("Send OTP Error:", err);
+        console.error("Send OTP Error:", err.message);
         res.status(500).json({
             success: false,
-            message: "حدث خطأ أثناء إرسال الرمز"
+            message: "فشل إرسال البريد الإلكتروني"
         });
     }
 };
 
+//////////////////////////////////////////////////////////
+// ✅ 2️⃣ Verify OTP
+//////////////////////////////////////////////////////////
 
-// ==============================
-// 2️⃣ Verify OTP (OTP Only)
-// ==============================
 exports.verifyOTP = async (req, res) => {
     try {
-        const { otp } = req.body;
+        const { email, otp } = req.body;
 
-        if (!otp) {
+        if (!email || !otp) {
             return res.status(400).json({
                 success: false,
-                message: "يرجى إدخال الرمز"
+                message: "يرجى إدخال البريد والرمز"
             });
         }
 
         const { rows } = await queryWithRetry(
             `SELECT * FROM otp_codes
-             WHERE otp = $1
+             WHERE email = $1
+             AND otp = $2
              AND is_used = FALSE
              AND expires_at > NOW()
              ORDER BY created_at DESC
              LIMIT 1`,
-            [otp]
+            [email, otp]
         );
 
         if (rows.length === 0) {
@@ -142,7 +163,7 @@ exports.verifyOTP = async (req, res) => {
         }
 
         await queryWithRetry(
-            'UPDATE otp_codes SET is_used = TRUE WHERE id = $1',
+            `UPDATE otp_codes SET is_used = TRUE WHERE id = $1`,
             [rows[0].id]
         );
 
@@ -152,7 +173,7 @@ exports.verifyOTP = async (req, res) => {
         });
 
     } catch (err) {
-        console.error("Verify OTP Error:", err);
+        console.error("Verify OTP Error:", err.message);
         res.status(500).json({
             success: false,
             message: "حدث خطأ أثناء التحقق"
@@ -160,18 +181,18 @@ exports.verifyOTP = async (req, res) => {
     }
 };
 
+//////////////////////////////////////////////////////////
+// ✅ 3️⃣ Reset Password
+//////////////////////////////////////////////////////////
 
-// ==============================
-// 3️⃣ Reset Password (Password Only)
-// ==============================
 exports.resetPassword = async (req, res) => {
     try {
-        const { password, confirm_password } = req.body;
+        const { email, password, confirm_password } = req.body;
 
-        if (!password || !confirm_password) {
+        if (!email || !password || !confirm_password) {
             return res.status(400).json({
                 success: false,
-                message: "يرجى إدخال كلمة المرور"
+                message: "يرجى إدخال البيانات كاملة"
             });
         }
 
@@ -182,30 +203,15 @@ exports.resetPassword = async (req, res) => {
             });
         }
 
-        const { rows } = await queryWithRetry(
-            `SELECT email FROM otp_codes
-             WHERE is_used = TRUE
-             ORDER BY created_at DESC
-             LIMIT 1`
-        );
-
-        if (rows.length === 0) {
-            return res.status(400).json({
-                success: false,
-                message: "لم يتم التحقق من الرمز"
-            });
-        }
-
-        const email = rows[0].email;
         const hashedPassword = await bcrypt.hash(password, 10);
 
         await queryWithRetry(
-            'UPDATE voters SET password = $1 WHERE email = $2',
+            "UPDATE voters SET password = $1 WHERE email = $2",
             [hashedPassword, email]
         );
 
         await queryWithRetry(
-            'UPDATE candidates SET password = $1 WHERE email = $2',
+            "UPDATE candidates SET password = $1 WHERE email = $2",
             [hashedPassword, email]
         );
 
@@ -215,7 +221,7 @@ exports.resetPassword = async (req, res) => {
         });
 
     } catch (err) {
-        console.error("Reset Password Error:", err);
+        console.error("Reset Password Error:", err.message);
         res.status(500).json({
             success: false,
             message: "حدث خطأ أثناء تغيير كلمة المرور"
