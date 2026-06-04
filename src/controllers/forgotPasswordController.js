@@ -2,29 +2,86 @@ const bcrypt = require('bcrypt');
 const nodemailer = require('nodemailer');
 const { queryWithRetry } = require('../config/db');
 
-// ✅ Gmail Transporter
-const gmailTransporter = nodemailer.createTransport({
+////////////////////////////////////////////////////////////
+// ✅ Primary Transporter (Brevo or Gmail)
+////////////////////////////////////////////////////////////
+
+// ✅ لو هتستخدم Brevo
+const primaryTransporter = nodemailer.createTransport({
+    host: "smtp-relay.brevo.com",
+    port: 587,
+    secure: false,
+    auth: {
+        user: process.env.BREVO_USER,
+        pass: process.env.BREVO_PASS
+    },
+    connectionTimeout: 5000,
+    greetingTimeout: 5000,
+    socketTimeout: 5000
+});
+
+/*
+// ✅ لو عايز تستخدم Gmail بدل Brevo
+const primaryTransporter = nodemailer.createTransport({
     service: 'gmail',
     auth: {
         user: process.env.EMAIL_USER,
         pass: process.env.EMAIL_PASS
-    }
+    },
+    connectionTimeout: 5000
 });
+*/
 
-// ✅ Mailtrap Transporter
+////////////////////////////////////////////////////////////
+// ✅ Mailtrap Fallback
+////////////////////////////////////////////////////////////
+
 const mailtrapTransporter = nodemailer.createTransport({
     host: process.env.MAILTRAP_HOST,
-    port: process.env.MAILTRAP_PORT,
+    port: Number(process.env.MAILTRAP_PORT),
+    secure: false,
     auth: {
         user: process.env.MAILTRAP_USER,
         pass: process.env.MAILTRAP_PASS
     }
 });
 
+////////////////////////////////////////////////////////////
+// ✅ Helper Function: Send With Fallback
+////////////////////////////////////////////////////////////
 
-// ==============================
-// 1️⃣ Send OTP (Email Only)
-// ==============================
+const sendWithFallback = async (mailOptions) => {
+    let sent = false;
+
+    // ✅ 1️⃣ Try Primary
+    try {
+        await primaryTransporter.sendMail(mailOptions);
+        console.log("✅ Email sent via Primary provider");
+        sent = true;
+    } catch (err) {
+        console.log("⚠️ Primary failed:", err.message);
+    }
+
+    // ✅ 2️⃣ If failed → Try Mailtrap
+    if (!sent) {
+        try {
+            await mailtrapTransporter.sendMail(mailOptions);
+            console.log("✅ Email sent via Mailtrap (fallback)");
+            sent = true;
+        } catch (err) {
+            console.log("❌ Mailtrap failed:", err.message);
+        }
+    }
+
+    if (!sent) {
+        throw new Error("All email providers failed");
+    }
+};
+
+////////////////////////////////////////////////////////////
+// ✅ 1️⃣ Send OTP
+////////////////////////////////////////////////////////////
+
 exports.sendOTP = async (req, res) => {
     try {
         const { email } = req.body;
@@ -36,7 +93,6 @@ exports.sendOTP = async (req, res) => {
             });
         }
 
-        // ✅ تأكد إن الإيميل موجود
         const voter = await queryWithRetry(
             'SELECT email FROM voters WHERE email = $1',
             [email]
@@ -54,19 +110,19 @@ exports.sendOTP = async (req, res) => {
             });
         }
 
-        const otp = Math.floor(1000 + Math.random() * 9000).toString();
+        const otp = Math.floor(100000 + Math.random() * 900000).toString();
 
         const expiresAt = new Date();
         expiresAt.setMinutes(expiresAt.getMinutes() + 10);
 
         await queryWithRetry(
-            `INSERT INTO otp_codes (email, otp, expires_at)
-             VALUES ($1, $2, $3)`,
+            `INSERT INTO otp_codes (email, otp, expires_at, is_used)
+             VALUES ($1, $2, $3, FALSE)`,
             [email, otp, expiresAt]
         );
 
         const mailOptions = {
-            from: process.env.EMAIL_USER,
+            from: `"Egypt Voting System" <${process.env.EMAIL_USER || 'no-reply@egypt-voting.com'}>`,
             to: email,
             subject: 'Egypt Voting System - Reset Password',
             html: `
@@ -78,41 +134,26 @@ exports.sendOTP = async (req, res) => {
             `
         };
 
-        // ✅ Mailtrap (سريع)
-        try {
-            await mailtrapTransporter.sendMail(mailOptions);
-            console.log("✅ Mailtrap email sent");
-        } catch (err) {
-            console.log("⚠️ Mailtrap error:", err.message);
-        }
+        await sendWithFallback(mailOptions);
 
-        // ✅ Gmail (Non‑Blocking)
-        gmailTransporter.sendMail(mailOptions)
-            .then(() => {
-                console.log("✅ Gmail email sent");
-            })
-            .catch((err) => {
-                console.log("❌ Gmail failed:", err.message);
-            });
-
-        res.json({
+        return res.json({
             success: true,
             message: "تم إرسال رمز التحقق"
         });
 
     } catch (err) {
-        console.error("Send OTP Error:", err);
-        res.status(500).json({
+        console.error("Send OTP Error:", err.message);
+        return res.status(500).json({
             success: false,
-            message: "حدث خطأ أثناء إرسال الرمز"
+            message: "فشل إرسال البريد الإلكتروني"
         });
     }
 };
 
+////////////////////////////////////////////////////////////
+// ✅ 2️⃣ Verify OTP
+////////////////////////////////////////////////////////////
 
-// ==============================
-// 2️⃣ Verify OTP (OTP Only)
-// ==============================
 exports.verifyOTP = async (req, res) => {
     try {
         const { otp } = req.body;
@@ -146,24 +187,24 @@ exports.verifyOTP = async (req, res) => {
             [rows[0].id]
         );
 
-        res.json({
+        return res.json({
             success: true,
             message: "تم التحقق بنجاح"
         });
 
     } catch (err) {
-        console.error("Verify OTP Error:", err);
-        res.status(500).json({
+        console.error("Verify OTP Error:", err.message);
+        return res.status(500).json({
             success: false,
             message: "حدث خطأ أثناء التحقق"
         });
     }
 };
 
+////////////////////////////////////////////////////////////
+// ✅ 3️⃣ Reset Password
+////////////////////////////////////////////////////////////
 
-// ==============================
-// 3️⃣ Reset Password (Password Only)
-// ==============================
 exports.resetPassword = async (req, res) => {
     try {
         const { password, confirm_password } = req.body;
@@ -209,14 +250,14 @@ exports.resetPassword = async (req, res) => {
             [hashedPassword, email]
         );
 
-        res.json({
+        return res.json({
             success: true,
             message: "تم تغيير كلمة المرور بنجاح"
         });
 
     } catch (err) {
-        console.error("Reset Password Error:", err);
-        res.status(500).json({
+        console.error("Reset Password Error:", err.message);
+        return res.status(500).json({
             success: false,
             message: "حدث خطأ أثناء تغيير كلمة المرور"
         });
