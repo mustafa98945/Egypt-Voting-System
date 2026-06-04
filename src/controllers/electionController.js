@@ -273,6 +273,29 @@ exports.getAllElections = async (req, res) => {
         });
     }
 };
+// ===============================
+// ✅ 4. جلب كل الانتخابات (للأدمن)
+// ===============================
+exports.getAllElections = async (req, res) => {
+    try {
+        const { rows } = await pool.query(
+            `SELECT * FROM elections ORDER BY created_at DESC`
+        );
+
+        res.json({
+            success: true,
+            count: rows.length,
+            data: rows
+        });
+
+    } catch (err) {
+        console.error("Get All Elections Error:", err);
+        res.status(500).json({
+            success: false,
+            message: err.message
+        });
+    }
+};
 
 // ===============================
 // ✅ 4. حذف انتخابات

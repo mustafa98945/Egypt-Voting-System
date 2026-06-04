@@ -114,11 +114,11 @@ exports.getVoteCard = async (req, res) => {
 };
 
 // --- 4. نتائج الانتخابات (كل المرشحين بأصواتهم وصورهم) ---
-exports.getResults = async (req, res) => {
+ exports.getResults = async (req, res) => {
     try {
 
         ////////////////////////////////////////////////////////////
-        // ✅ 1️⃣ هات آخر دورة انتخابية approved (Global)
+        // ✅ 1️⃣ هات آخر دورة انتخابية approved
         ////////////////////////////////////////////////////////////
         const { rows: groupRows } = await pool.query(
             `SELECT eg.group_id
@@ -154,18 +154,18 @@ exports.getResults = async (req, res) => {
         const totalVotes = totalVotesRows[0]?.total_votes || 0;
 
         ////////////////////////////////////////////////////////////
-        // ✅ 3️⃣ عدد المرشحين المعتمدين في الدورة
+        // ✅ 3️⃣ عدد المرشحين المعتمدين
         ////////////////////////////////////////////////////////////
         const { rows: candidatesCountRows } = await pool.query(
-            `SELECT COUNT(DISTINCT c.candidate_id)::INT AS total_candidates
-             FROM candidates c
-             WHERE c.is_approved = TRUE`
+            `SELECT COUNT(*)::INT AS total_candidates
+             FROM candidates
+             WHERE is_approved = TRUE`
         );
 
         const totalCandidates = candidatesCountRows[0]?.total_candidates || 0;
 
         ////////////////////////////////////////////////////////////
-        // ✅ 4️⃣ النتائج مجمعة + نسبة التصويت (بدون فلترة محافظة)
+        // ✅ 4️⃣ النتائج مجمعة + نسبة التصويت (التعديل الصحيح هنا)
         ////////////////////////////////////////////////////////////
         const { rows } = await pool.query(
             `SELECT 
@@ -188,7 +188,7 @@ exports.getResults = async (req, res) => {
               ON c.candidate_id = v.candidate_id
             LEFT JOIN elections e 
               ON v.election_id = e.election_id
-              AND e.election_group_id = $1   -- ✅ مهم جداً
+              AND e.election_group_id = $1   -- ✅ اتحرك الشرط هنا
             WHERE 
                 c.is_approved = TRUE
             GROUP BY 

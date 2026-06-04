@@ -698,12 +698,12 @@ exports.decideElectionGroup = async (req, res) => {
         // 🔥 أهم تعديل: إيقاف الانتخابات
         ////////////////////////////////////////////////////////////
         await pool.query(
-            `UPDATE elections
-             SET result_status = $1,
-                 is_active = FALSE   -- ✅ إيقاف التصويت فوراً
-             WHERE election_group_id = $2`,
-            [decision, groupId]
-        );
+    `UPDATE elections
+     SET result_status = $1,
+         is_active = FALSE
+     WHERE election_group_id = $2`,
+    [decision, groupId]
+);
 
         ////////////////////////////////////////////////////////////
         // ✅ 3️⃣ إغلاق الجروب
