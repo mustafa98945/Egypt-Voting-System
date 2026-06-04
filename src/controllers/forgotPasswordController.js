@@ -1,43 +1,41 @@
 const bcrypt = require('bcrypt');
-const SibApiV3Sdk = require('@getbrevo/brevo');
+const axios = require('axios');
 const { queryWithRetry } = require('../config/db');
 
 ////////////////////////////////////////////////////////////
-// ✅ Brevo API Config
-////////////////////////////////////////////////////////////
-
-const apiInstance = new SibApiV3Sdk.TransactionalEmailsApi();
-
-apiInstance.setApiKey(
-  SibApiV3Sdk.TransactionalEmailsApiApiKeys.apiKey,
-  process.env.BREVO_API_KEY
-);
-
-////////////////////////////////////////////////////////////
-// ✅ Send Email Function (Background)
+// ✅ Send Email Using Brevo REST API
 ////////////////////////////////////////////////////////////
 
 const sendEmail = async (email, otp) => {
   try {
-    await apiInstance.sendTransacEmail({
-      sender: {
-        email: process.env.BREVO_SENDER,
-        name: "Egypt Voting System"
+    await axios.post(
+      "https://api.brevo.com/v3/smtp/email",
+      {
+        sender: {
+          name: "Egypt Voting System",
+          email: process.env.BREVO_SENDER
+        },
+        to: [{ email }],
+        subject: "Egypt Voting System - Reset Password",
+        htmlContent: `
+          <div style="font-family: Arial; text-align: center;">
+            <h2>Egypt Voting System</h2>
+            <h1 style="font-size:40px; letter-spacing:5px;">${otp}</h1>
+            <p>This code expires in 10 minutes.</p>
+          </div>
+        `
       },
-      to: [{ email }],
-      subject: "Egypt Voting System - Reset Password",
-      htmlContent: `
-        <div style="font-family: Arial; text-align: center;">
-          <h2>Egypt Voting System</h2>
-          <h1 style="font-size:40px; letter-spacing:5px;">${otp}</h1>
-          <p>This code expires in 10 minutes.</p>
-        </div>
-      `
-    });
+      {
+        headers: {
+          "api-key": process.env.BREVO_API_KEY,
+          "Content-Type": "application/json"
+        }
+      }
+    );
 
-    console.log("✅ Email sent via Brevo");
+    console.log("✅ Email sent via Brevo API");
   } catch (error) {
-    console.log("❌ Brevo Error:", error.message);
+    console.log("❌ Brevo Error:", error.response?.data || error.message);
   }
 };
 
@@ -89,7 +87,7 @@ exports.sendOTP = async (req, res) => {
       message: "تم إرسال رمز التحقق"
     });
 
-    // ✅ إرسال الإيميل في الخلفية
+    // ✅ Send email in background
     sendEmail(email, otp);
 
   } catch (err) {
@@ -102,7 +100,7 @@ exports.sendOTP = async (req, res) => {
 };
 
 ////////////////////////////////////////////////////////////
-// ✅ 2️⃣ Verify OTP (مربوط بالإيميل ✅)
+// ✅ 2️⃣ Verify OTP
 ////////////////////////////////////////////////////////////
 
 exports.verifyOTP = async (req, res) => {
@@ -154,7 +152,7 @@ exports.verifyOTP = async (req, res) => {
 };
 
 ////////////////////////////////////////////////////////////
-// ✅ 3️⃣ Reset Password (مربوط بنفس الإيميل ✅)
+// ✅ 3️⃣ Reset Password
 ////////////////////////////////////////////////////////////
 
 exports.resetPassword = async (req, res) => {
@@ -175,7 +173,6 @@ exports.resetPassword = async (req, res) => {
       });
     }
 
-    // ✅ تأكد أن الإيميل تم التحقق منه
     const { rows } = await queryWithRetry(
       `SELECT * FROM otp_codes
        WHERE email = $1
