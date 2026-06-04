@@ -32,14 +32,12 @@ const mailtrapTransporter = nodemailer.createTransport({
 });
 
 ////////////////////////////////////////////////////////////
-// ✅ Background Send With Fallback (Non‑Blocking)
+// ✅ Background Send With Fallback
 ////////////////////////////////////////////////////////////
 
 const sendInBackground = (mailOptions) => {
     primaryTransporter.sendMail(mailOptions)
-        .then(() => {
-            console.log("✅ Sent via Primary");
-        })
+        .then(() => console.log("✅ Sent via Primary"))
         .catch((err) => {
             console.log("⚠️ Primary failed:", err.message);
 
@@ -50,7 +48,7 @@ const sendInBackground = (mailOptions) => {
 };
 
 ////////////////////////////////////////////////////////////
-// ✅ 1️⃣ Send OTP (FAST RESPONSE)
+// ✅ 1️⃣ Send OTP (4 DIGITS)
 ////////////////////////////////////////////////////////////
 
 exports.sendOTP = async (req, res) => {
@@ -81,7 +79,8 @@ exports.sendOTP = async (req, res) => {
             });
         }
 
-        const otp = Math.floor(100000 + Math.random() * 900000).toString();
+        // ✅ OTP 4 أرقام فقط
+        const otp = Math.floor(1000 + Math.random() * 9000).toString();
 
         const expiresAt = new Date();
         expiresAt.setMinutes(expiresAt.getMinutes() + 10);
@@ -92,13 +91,12 @@ exports.sendOTP = async (req, res) => {
             [email, otp, expiresAt]
         );
 
-        // ✅ رجّع Response فورًا بدون انتظار الإيميل
+        // ✅ رجّع Response فورًا
         res.json({
             success: true,
             message: "تم إرسال رمز التحقق"
         });
 
-        // ✅ إرسال الإيميل في الخلفية
         const mailOptions = {
             from: `"Egypt Voting System" <no-reply@egypt-voting.com>`,
             to: email,
@@ -227,7 +225,6 @@ exports.resetPassword = async (req, res) => {
             success: true,
             message: "تم تغيير كلمة المرور بنجاح"
         });
-
     } catch (err) {
         console.error("Reset Password Error:", err.message);
         return res.status(500).json({
