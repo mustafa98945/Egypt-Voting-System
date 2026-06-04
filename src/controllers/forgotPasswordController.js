@@ -3,29 +3,16 @@ const nodemailer = require("nodemailer");
 const { queryWithRetry } = require("../config/db");
 
 ////////////////////////////////////////////////////////////
-// ✅ Gmail Transporter (Production Ready)
+// ✅ Mailtrap Transporter (Only)
 ////////////////////////////////////////////////////////////
 
 const transporter = nodemailer.createTransport({
-    host: "smtp.gmail.com",
-    port: 587,
+    host: process.env.MAILTRAP_HOST,
+    port: Number(process.env.MAILTRAP_PORT),
     secure: false,
-    requireTLS: true,
     auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS
-    },
-    connectionTimeout: 5000,
-    greetingTimeout: 5000,
-    socketTimeout: 5000
-});
-
-// ✅ تأكد إن الاتصال شغال
-transporter.verify((error, success) => {
-    if (error) {
-        console.error("❌ SMTP Error:", error);
-    } else {
-        console.log("✅ Gmail SMTP Ready");
+        user: process.env.MAILTRAP_USER,
+        pass: process.env.MAILTRAP_PASS
     }
 });
 
@@ -44,24 +31,6 @@ exports.sendOTP = async (req, res) => {
             });
         }
 
-        // ✅ تحقق إن الإيميل موجود
-        const voter = await queryWithRetry(
-            "SELECT email FROM voters WHERE email = $1",
-            [email]
-        );
-
-        const candidate = await queryWithRetry(
-            "SELECT email FROM candidates WHERE email = $1",
-            [email]
-        );
-
-        if (voter.rows.length === 0 && candidate.rows.length === 0) {
-            return res.status(404).json({
-                success: false,
-                message: "البريد الإلكتروني غير مسجل"
-            });
-        }
-
         const otp = Math.floor(100000 + Math.random() * 900000).toString();
 
         const expiresAt = new Date();
@@ -74,7 +43,7 @@ exports.sendOTP = async (req, res) => {
         );
 
         const mailOptions = {
-            from: `"Egypt Voting System" <${process.env.EMAIL_USER}>`,
+            from: `"Egypt Voting System" <no-reply@egypt-voting.com>`,
             to: email,
             subject: "Reset Password OTP",
             html: `
@@ -136,7 +105,7 @@ exports.verifyOTP = async (req, res) => {
         }
 
         await queryWithRetry(
-            "UPDATE otp_codes SET is_used = TRUE WHERE id = $1",
+            `UPDATE otp_codes SET is_used = TRUE WHERE id = $1`,
             [rows[0].id]
         );
 
