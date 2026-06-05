@@ -371,13 +371,20 @@ exports.getCandidateProfile = async (req, res) => {
             });
         }
 
+        // ✅ تنسيق التاريخ (YYYY-MM-DD)
+        let formattedDate = null;
+        if (candidate.birth_date) {
+            const date = new Date(candidate.birth_date);
+            formattedDate = date.toISOString().split('T')[0];
+        }
+
         res.json({
             success: true,
             data: {
                 name: candidate.full_name,
                 email: candidate.email,
                 phone_number: candidate.phone_number,
-                date_of_birth: candidate.birth_date,
+                date_of_birth: formattedDate, // ✅ التاريخ المعدل هنا
                 address: candidate.address,
                 government: candidate.governorate,
                 administrative_unit: candidate.administrative_unit,
