@@ -1,7 +1,9 @@
 const Vote = require('../models/voteModel');
 const { pool } = require('../config/db');
 
+////////////////////////////////////////////////////////////
 // --- 1. تنفيذ التصويت ---
+////////////////////////////////////////////////////////////
 exports.castVote = async (req, res) => {
     try {
         const { id, role, governorate } = req.user;
@@ -14,7 +16,7 @@ exports.castVote = async (req, res) => {
             });
         }
 
-        // ✅ 1. التحقق من وجود انتخابات نشطة بالساعة
+        // ✅ التحقق من وجود انتخابات نشطة
         const { rows: electionRows } = await pool.query(
             `SELECT election_id
              FROM elections
@@ -39,7 +41,6 @@ exports.castVote = async (req, res) => {
         const tableName = role === 'candidate' ? 'candidates' : 'voters';
         const idColumn = role === 'candidate' ? 'candidate_id' : 'voter_id';
 
-        // ✅ 2. التحقق من التصويت المسبق
         const status = await Vote.checkIfVoted(tableName, idColumn, id);
         if (status && status.has_voted) {
             return res.status(400).json({
@@ -48,17 +49,15 @@ exports.castVote = async (req, res) => {
             });
         }
 
-        // ✅ 3. تنفيذ التصويت (مع تمرير electionId)
         await Vote.executeVote(
             role,
             id,
             candidate_id,
             tableName,
             idColumn,
-            electionId   // ✅ أضفناها هنا
+            electionId
         );
 
-        // ✅ 4. جلب بيانات الـ Vote Card
         const voteCard = await Vote.getVoteCard(id, role);
 
         res.status(200).json({
@@ -75,7 +74,10 @@ exports.castVote = async (req, res) => {
         });
     }
 };
+
+////////////////////////////////////////////////////////////
 // --- 2. التحقق من حالة التصويت ---
+////////////////////////////////////////////////////////////
 exports.checkUserVotingStatus = async (req, res) => {
     try {
         const { id, role } = req.user;
@@ -88,13 +90,16 @@ exports.checkUserVotingStatus = async (req, res) => {
             success: true,
             hasVoted: status ? status.has_voted : false
         });
+
     } catch (err) {
         console.error("Check Status Error:", err.message);
         res.status(500).json({ success: false, message: "خطأ في جلب حالة التصويت" });
     }
 };
 
-// --- 3. جلب الـ Vote Card بعد التصويت ---
+////////////////////////////////////////////////////////////
+// --- 3. جلب الـ Vote Card ---
+////////////////////////////////////////////////////////////
 exports.getVoteCard = async (req, res) => {
     try {
         const { id, role } = req.user;
@@ -102,23 +107,27 @@ exports.getVoteCard = async (req, res) => {
 
         if (!voteCard) {
             return res.status(404).json({
-                success: false, message: "لم يتم التصويت بعد"
+                success: false,
+                message: "لم يتم التصويت بعد"
             });
         }
 
         res.json({ success: true, vote_card: voteCard });
+
     } catch (err) {
         console.error("Vote Card Error:", err.message);
         res.status(500).json({ success: false, message: "خطأ في جلب بيانات الكارت" });
     }
 };
 
-// --- 4. نتائج الانتخابات (كل المرشحين بأصواتهم وصورهم) ---
- exports.getResults = async (req, res) => {
+////////////////////////////////////////////////////////////
+// --- 4. نتائج الانتخابات ---
+////////////////////////////////////////////////////////////
+exports.getResults = async (req, res) => {
     try {
 
         ////////////////////////////////////////////////////////////
-        // ✅ 1️⃣ هات آخر دورة انتخابية approved
+        // ✅ 1️⃣ آخر دورة approved
         ////////////////////////////////////////////////////////////
         const { rows: groupRows } = await pool.query(
             `SELECT eg.group_id
@@ -140,7 +149,7 @@ exports.getVoteCard = async (req, res) => {
         const groupId = groupRows[0].group_id;
 
         ////////////////////////////////////////////////////////////
-        // ✅ 2️⃣ إجمالي عدد الأصوات في الدورة
+        // ✅ 2️⃣ إجمالي الأصوات لنفس الدورة فقط
         ////////////////////////////////////////////////////////////
         const { rows: totalVotesRows } = await pool.query(
             `SELECT COUNT(v.vote_id)::INT AS total_votes
@@ -165,7 +174,7 @@ exports.getVoteCard = async (req, res) => {
         const totalCandidates = candidatesCountRows[0]?.total_candidates || 0;
 
         ////////////////////////////////////////////////////////////
-        // ✅ 4️⃣ النتائج مجمعة + نسبة التصويت (التعديل الصحيح هنا)
+        // ✅ 4️⃣ النتائج الصحيحة (التعديل هنا ✅)
         ////////////////////////////////////////////////////////////
         const { rows } = await pool.query(
             `SELECT 
@@ -186,11 +195,12 @@ exports.getVoteCard = async (req, res) => {
               ON TRIM(c.national_id) = TRIM(cr.national_id)
             LEFT JOIN votes v 
               ON c.candidate_id = v.candidate_id
-            LEFT JOIN elections e 
-              ON v.election_id = e.election_id
-              AND e.election_group_id = $1   -- ✅ اتحرك الشرط هنا
-            WHERE 
-                c.is_approved = TRUE
+              AND v.election_id IN (
+                    SELECT election_id
+                    FROM elections
+                    WHERE election_group_id = $1
+              )
+            WHERE c.is_approved = TRUE
             GROUP BY 
                 c.candidate_id, 
                 cr.full_name, 
@@ -209,7 +219,7 @@ exports.getVoteCard = async (req, res) => {
         const winner = rows.length > 0 ? rows[0] : null;
 
         ////////////////////////////////////////////////////////////
-        // ✅ 6️⃣ Response النهائي
+        // ✅ 6️⃣ Response
         ////////////////////////////////////////////////////////////
         return res.json({
             success: true,
