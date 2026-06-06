@@ -287,36 +287,46 @@ exports.loginCandidate = async (req, res) => {
 exports.listCandidates = async (req, res) => {
     try {
         const userUnit = req.user.administrative_unit;
-        const userGov = req.user.governorate;
+        const userGov  = req.user.governorate;
 
         if (!userUnit || !userGov) {
-            return res.status(400).json({
-                success: false,
-                message: "User data is incomplete"
+            return res.json({
+                success: true,
+                count: 0,
+                data: []
             });
         }
 
-        // ✅ تحقق إن في انتخابات شغالة للمحافظة
+        ////////////////////////////////////////////////////////////
+        // ✅ 1️⃣ التحقق من وجود انتخابات نشطة
+        ////////////////////////////////////////////////////////////
         const { rows: electionRows } = await pool.query(
-            `SELECT election_id
-             FROM elections
-             WHERE is_active = TRUE
-             AND TRIM(governorate) = TRIM($1)
-             AND CURRENT_TIMESTAMP >= start_date
-             AND CURRENT_TIMESTAMP <= end_date
-             ORDER BY created_at DESC
+            `SELECT e.election_id
+             FROM elections e
+             JOIN election_groups eg 
+               ON e.election_group_id = eg.group_id
+             WHERE eg.is_closed = FALSE
+             AND TRIM(e.governorate) = TRIM($1)
+             AND CURRENT_TIMESTAMP BETWEEN e.start_date AND e.end_date
+             ORDER BY e.created_at DESC
              LIMIT 1`,
             [userGov]
         );
 
+        // ✅ لو مفيش انتخابات → رجع data فاضية بس
         if (electionRows.length === 0) {
-            return res.status(403).json({
-                success: false,
-                message: "There are no active elections in your governorate at the moment"
+            return res.json({
+                success: true,
+                count: 0,
+                data: []
             });
         }
 
-        // ✅ جلب المرشحين مع التأكد إن الدائرة تبع نفس المحافظة
+        const electionId = electionRows[0].election_id;
+
+        ////////////////////////////////////////////////////////////
+        // ✅ 2️⃣ جلب المرشحين لنفس الانتخابات فقط
+        ////////////////////////////////////////////////////////////
         const { rows } = await pool.query(
             `SELECT 
                 c.candidate_id,
@@ -335,11 +345,15 @@ exports.listCandidates = async (req, res) => {
              WHERE TRIM(cr.administrative_unit) = TRIM($1)
              AND TRIM(ed.governorate) = TRIM($2)
              AND c.is_approved = TRUE
+             AND c.election_id = $3
              ORDER BY c.created_at DESC`,
-            [userUnit, userGov]
+            [userUnit, userGov, electionId]
         );
 
-        res.json({
+        ////////////////////////////////////////////////////////////
+        // ✅ نفس شكل الريسبونس القديم
+        ////////////////////////////////////////////////////////////
+        return res.json({
             success: true,
             count: rows.length,
             data: rows
@@ -347,9 +361,10 @@ exports.listCandidates = async (req, res) => {
 
     } catch (err) {
         console.error("List Candidates Error:", err);
-        res.status(500).json({
-            success: false,
-            message: "Error loading candidates list"
+        return res.json({
+            success: true,
+            count: 0,
+            data: []
         });
     }
 };
