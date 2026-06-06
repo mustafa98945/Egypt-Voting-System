@@ -857,16 +857,29 @@ exports.getVotersStatus = async (req, res) => {
 
 exports.getVotesData = async (req, res) => {
     try {
-        const { rows } = await pool.query(
+        const { rows } = await queryWithRetry(
             `SELECT 
-                vote_id,
-                voter_id,
-                voter_role,
-                candidate_id,
-                election_id,
-                created_at
-             FROM votes
-             ORDER BY created_at DESC`
+                COALESCE(v.vote_id, 0)                     AS vote_id,
+                COALESCE(v.voter_id, 0)                    AS voter_id,
+                COALESCE(v.voter_role, '')                 AS voter_role,
+                COALESCE(v.candidate_id, 0)                AS candidate_id,
+                COALESCE(v.election_id, 0)                 AS election_id,
+                COALESCE(cr_voter.full_name, '')           AS voter_name,
+                COALESCE(cr_candidate.full_name, '')       AS candidate_name,
+                COALESCE(e.election_name, '')              AS election_name,
+                v.created_at
+             FROM votes v
+             LEFT JOIN voters vt
+               ON v.voter_id = vt.voter_id
+             LEFT JOIN civil_registry cr_voter
+               ON TRIM(vt.national_id) = TRIM(cr_voter.national_id)
+             LEFT JOIN candidates c
+               ON v.candidate_id = c.candidate_id
+             LEFT JOIN civil_registry cr_candidate
+               ON TRIM(c.national_id) = TRIM(cr_candidate.national_id)
+             LEFT JOIN elections e
+               ON v.election_id = e.election_id
+             ORDER BY v.created_at DESC`
         );
 
         res.json({
