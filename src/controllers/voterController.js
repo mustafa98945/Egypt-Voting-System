@@ -7,7 +7,7 @@ const Voter = require('../models/voterModel');
 console.log("✅ VoterController Loaded Successfully");
 
 ////////////////////////////////////////////////////////////
-// ✅ رفع الصور
+// ✅ Image Upload
 ////////////////////////////////////////////////////////////
 const processBase64AndUpload = async (base64String, fileName, folder = 'voters_cards/party_cards') => {
     try {
@@ -29,6 +29,7 @@ const processBase64AndUpload = async (base64String, fileName, folder = 'voters_c
         return null;
     }
 };
+
 ////////////////////////////////////////////////////////////
 // ✅ VERIFY BEFORE REGISTER
 ////////////////////////////////////////////////////////////
@@ -45,15 +46,14 @@ exports.verifyBeforeRegister = async (req, res) => {
         if (!citizen) {
             return res.status(401).json({
                 success: false,
-                message: "بيانات غير صحيحة"
+                message: "Invalid information"
             });
         }
 
-        // ✅ شرط السن من DB
         if (citizen.age < 18) {
             return res.status(400).json({
                 success: false,
-                message: "يجب أن يكون عمرك 18 سنة أو أكثر للتسجيل"
+                message: "You must be at least 18 years old to register"
             });
         }
 
@@ -92,15 +92,14 @@ exports.registerVoter = async (req, res) => {
         if (!citizen) {
             return res.status(401).json({
                 success: false,
-                message: "فشل التحقق"
+                message: "Verification failed"
             });
         }
 
-        // ✅ شرط السن من DB
         if (citizen.age < 18) {
             return res.status(400).json({
                 success: false,
-                message: "يجب أن يكون عمرك 18 سنة أو أكثر للتسجيل"
+                message: "You must be at least 18 years old to register"
             });
         }
 
@@ -138,6 +137,7 @@ exports.registerVoter = async (req, res) => {
         });
     }
 };
+
 ////////////////////////////////////////////////////////////
 // ✅ LOGIN
 ////////////////////////////////////////////////////////////
@@ -148,14 +148,14 @@ exports.login = async (req, res) => {
         let voter;
 
         ////////////////////////////////////////////////////////////
-        // ✅ 1️⃣ Login باستخدام national_id فقط
+        // ✅ Login using national_id
         ////////////////////////////////////////////////////////////
         if (national_id) {
             voter = await Voter.findByNationalId(national_id);
         }
 
         ////////////////////////////////////////////////////////////
-        // ✅ 2️⃣ Login باستخدام Email + Password
+        // ✅ Login using Email + Password
         ////////////////////////////////////////////////////////////
         else if (email && password) {
 
@@ -167,34 +167,34 @@ exports.login = async (req, res) => {
                 if (!isMatch) {
                     return res.status(401).json({
                         success: false,
-                        message: "كلمة المرور غير صحيحة"
+                        message: "Incorrect password"
                     });
                 }
             }
         }
 
         ////////////////////////////////////////////////////////////
-        // ✅ مفيش بيانات
+        // ✅ Missing credentials
         ////////////////////////////////////////////////////////////
         else {
             return res.status(400).json({
                 success: false,
-                message: "يرجى إدخال بيانات الدخول"
+                message: "Please enter login credentials"
             });
         }
 
         ////////////////////////////////////////////////////////////
-        // ✅ الحساب غير موجود
+        // ✅ Account not found
         ////////////////////////////////////////////////////////////
         if (!voter) {
             return res.status(404).json({
                 success: false,
-                message: "الحساب غير موجود"
+                message: "Account not found"
             });
         }
 
         ////////////////////////////////////////////////////////////
-        // ✅ إنشاء التوكن
+        // ✅ Generate token
         ////////////////////////////////////////////////////////////
         const token = jwt.sign(
             {
@@ -231,9 +231,6 @@ exports.login = async (req, res) => {
 };
 
 ////////////////////////////////////////////////////////////
-// ✅ PROFILE (Edit Profile Screen)
-////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////
 // ✅ VOTER PROFILE
 ////////////////////////////////////////////////////////////
 exports.getVoterProfile = async (req, res) => {
@@ -248,7 +245,11 @@ exports.getVoterProfile = async (req, res) => {
             });
         }
 
-        
+        let formattedDate = null;
+        if (voter.birth_date) {
+            const date = new Date(voter.birth_date);
+            formattedDate = date.toISOString().split('T')[0];
+        }
 
         res.json({
             success: true,
@@ -256,7 +257,7 @@ exports.getVoterProfile = async (req, res) => {
                 name: voter.full_name,
                 email: voter.email,
                 phone_number: voter.phone_number || null,
-                date_of_birth: voter.birth_date,
+                date_of_birth: formattedDate,
                 address: voter.address,
                 government: voter.governorate,
                 administrative_unit: voter.administrative_unit,

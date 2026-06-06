@@ -2,8 +2,9 @@ const { pool } = require('../config/db');
 const { uploadToSupabase } = require('../utils/supabaseHelper');
 const sharp = require('sharp');
 
-
-// ✅ دالة رفع الصور
+////////////////////////////////////////////////////////////
+// ✅ Image Upload Helper
+////////////////////////////////////////////////////////////
 const processAndUpload = async (base64String, fileName) => {
     try {
         if (!base64String) return null;
@@ -25,11 +26,9 @@ const processAndUpload = async (base64String, fileName) => {
     }
 };
 
-
-
-// ===============================
-// ✅ 1. إنشاء انتخابات
-// ===============================
+////////////////////////////////////////////////////////////
+// ✅ 1. Create Election
+////////////////////////////////////////////////////////////
 exports.createElection = async (req, res) => {
     try {
         const {
@@ -44,18 +43,16 @@ exports.createElection = async (req, res) => {
         if (!election_type || !election_name || !start_date || !end_date) {
             return res.status(400).json({
                 success: false,
-                message: "يرجى إدخال جميع البيانات المطلوبة"
+                message: "Please provide all required fields"
             });
         }
 
-        // ✅ تحويل التاريخ لبداية ونهاية اليوم
         const start = new Date(start_date);
         start.setHours(0, 0, 0, 0);
 
         const end = new Date(end_date);
         end.setHours(23, 59, 59, 999);
 
-        // ✅ الحصول على الجروب المفتوح
         let { rows: groupRows } = await pool.query(
             `SELECT group_id 
              FROM election_groups 
@@ -101,7 +98,7 @@ exports.createElection = async (req, res) => {
 
         res.status(201).json({
             success: true,
-            message: "تم إنشاء الانتخابات بنجاح",
+            message: "Election created successfully",
             data: rows[0]
         });
 
@@ -110,9 +107,10 @@ exports.createElection = async (req, res) => {
         res.status(500).json({ success: false, message: err.message });
     }
 };
-// ===============================
-// ✅ 2. تعديل انتخابات
-// ===============================
+
+////////////////////////////////////////////////////////////
+// ✅ 2. Edit Election
+////////////////////////////////////////////////////////////
 exports.editElection = async (req, res) => {
     try {
         const { id } = req.params;
@@ -133,7 +131,7 @@ exports.editElection = async (req, res) => {
         if (existing.length === 0) {
             return res.status(404).json({
                 success: false,
-                message: "الانتخابات غير موجودة"
+                message: "Election not found"
             });
         }
 
@@ -143,7 +141,6 @@ exports.editElection = async (req, res) => {
             logoUrl = await processAndUpload(logo_url, fileName);
         }
 
-        // ✅ تحويل التاريخ لو تم إرساله
         let start = existing[0].start_date;
         let end = existing[0].end_date;
 
@@ -180,7 +177,7 @@ exports.editElection = async (req, res) => {
 
         res.json({
             success: true,
-            message: "تم تعديل الانتخابات بنجاح",
+            message: "Election updated successfully",
             data: rows[0]
         });
 
@@ -190,11 +187,9 @@ exports.editElection = async (req, res) => {
     }
 };
 
-
-
-// ===============================
-// ✅ 3. حالة الانتخابات (بالساعة)
-// ===============================
+////////////////////////////////////////////////////////////
+// ✅ 3. Election Status
+////////////////////////////////////////////////////////////
 exports.getElectionStatus = async (req, res) => {
     try {
         const { rows } = await pool.query(
@@ -250,32 +245,9 @@ exports.getElectionStatus = async (req, res) => {
     }
 };
 
-// ===============================
-// ✅ 4. جلب كل الانتخابات (للأدمن)
-// ===============================
-exports.getAllElections = async (req, res) => {
-    try {
-        const { rows } = await pool.query(
-            `SELECT * FROM elections ORDER BY created_at DESC`
-        );
-
-        res.json({
-            success: true,
-            count: rows.length,
-            data: rows
-        });
-
-    } catch (err) {
-        console.error("Get All Elections Error:", err);
-        res.status(500).json({
-            success: false,
-            message: err.message
-        });
-    }
-};
-// ===============================
-// ✅ 4. جلب كل الانتخابات (للأدمن)
-// ===============================
+////////////////////////////////////////////////////////////
+// ✅ 4. Get All Elections
+////////////////////////////////////////////////////////////
 exports.getAllElections = async (req, res) => {
     try {
         const { rows } = await pool.query(
@@ -297,9 +269,9 @@ exports.getAllElections = async (req, res) => {
     }
 };
 
-// ===============================
-// ✅ 4. حذف انتخابات
-// ===============================
+////////////////////////////////////////////////////////////
+// ✅ 5. Delete Election
+////////////////////////////////////////////////////////////
 exports.deleteElection = async (req, res) => {
     try {
         const { id } = req.params;
@@ -311,7 +283,7 @@ exports.deleteElection = async (req, res) => {
 
         res.json({
             success: true,
-            message: "تم حذف الانتخابات بنجاح"
+            message: "Election deleted successfully"
         });
 
     } catch (err) {
@@ -319,7 +291,9 @@ exports.deleteElection = async (req, res) => {
     }
 };
 
-// ✅ جلب كل المحافظات (Dropdown)
+////////////////////////////////////////////////////////////
+// ✅ Get Governorates
+////////////////////////////////////////////////////////////
 exports.getGovernorates = async (req, res) => {
     try {
         const { rows } = await pool.query(
@@ -338,7 +312,7 @@ exports.getGovernorates = async (req, res) => {
         console.error("Get Governorates Error:", err.message);
         res.status(500).json({
             success: false,
-            message: "حدث خطأ أثناء جلب المحافظات"
+            message: "An error occurred while fetching governorates"
         });
     }
 };

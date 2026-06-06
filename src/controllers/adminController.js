@@ -10,7 +10,7 @@ exports.login = async (req, res) => {
         if (!email || !password) {
             return res.status(400).json({
                 success: false,
-                message: "يرجى إدخال البيانات"
+                message: "Please enter the required data"
             });
         }
 
@@ -23,7 +23,7 @@ exports.login = async (req, res) => {
         if (!admin) {
             return res.status(404).json({
                 success: false,
-                message: "الحساب غير موجود"
+                message: "Account not found"
             });
         }
 
@@ -31,7 +31,7 @@ exports.login = async (req, res) => {
         if (!isMatch) {
             return res.status(401).json({
                 success: false,
-                message: "كلمة المرور غير صحيحة"
+                message: "Incorrect password"
             });
         }
 
@@ -107,7 +107,7 @@ exports.logout = async (req, res) => {
 
         res.json({
             success: true,
-            message: "تم تسجيل الخروج بنجاح"
+            message: "Logged out successfully"
         });
 
     } catch (err) {
@@ -123,7 +123,7 @@ exports.addAdmin = async (req, res) => {
         if (!email || !password) {
             return res.status(400).json({
                 success: false,
-                message: "يرجى إدخال البيانات"
+                message: "Please enter the required data"
             });
         }
 
@@ -134,7 +134,7 @@ exports.addAdmin = async (req, res) => {
         if (existing.length > 0) {
             return res.status(400).json({
                 success: false,
-                message: "البريد الإلكتروني مسجل مسبقاً"
+                message: "Email is already registered"
             });
         }
 
@@ -149,7 +149,7 @@ exports.addAdmin = async (req, res) => {
 
         res.status(201).json({
             success: true,
-            message: "تم إضافة الأدمن بنجاح",
+            message: "Admin added successfully",
             data: rows[0]
         });
 
@@ -193,7 +193,7 @@ exports.deleteAdmin = async (req, res) => {
         if (parseInt(id) === req.user.id) {
             return res.status(400).json({
                 success: false,
-                message: "لا يمكنك حذف حسابك الخاص"
+                message: "You cannot delete your own account"
             });
         }
 
@@ -204,7 +204,7 @@ exports.deleteAdmin = async (req, res) => {
 
         res.json({
             success: true,
-            message: "تم حذف الأدمن بنجاح"
+            message: "Admin deleted successfully"
         });
 
     } catch (err) {
@@ -226,7 +226,7 @@ exports.editAdmin = async (req, res) => {
         if (existing.length === 0) {
             return res.status(404).json({
                 success: false,
-                message: "الأدمن غير موجود"
+                message: "Admin not found"
             });
         }
 
@@ -247,7 +247,7 @@ exports.editAdmin = async (req, res) => {
 
         res.json({
             success: true,
-            message: "تم تعديل الأدمن بنجاح",
+            message: "Admin updated successfully",
             data: rows[0]
         });
 
@@ -332,7 +332,7 @@ exports.getCandidateDetails = async (req, res) => {
         if (rows.length === 0) {
             return res.status(404).json({
                 success: false,
-                message: "المرشح غير موجود"
+                message: "Candidate not found"
             });
         }
 
@@ -355,7 +355,7 @@ exports.decideCandidateApproval = async (req, res) => {
         if (!decision || !['accepted', 'refused'].includes(decision)) {
             return res.status(400).json({
                 success: false,
-                message: "يرجى إدخال القرار: accepted أو refused"
+                message: "Please provide a valid decision: accepted or refused"
             });
         }
 
@@ -372,15 +372,15 @@ exports.decideCandidateApproval = async (req, res) => {
         if (rows.length === 0) {
             return res.status(404).json({
                 success: false,
-                message: "المرشح غير موجود"
+                message: "Candidate not found"
             });
         }
 
         res.json({
             success: true,
             message: decision === 'accepted' 
-                ? "تم قبول المرشح بنجاح" 
-                : "تم رفض المرشح",
+                ? "Candidate accepted successfully"
+                : "Candidate refused",
             data: rows[0]
         });
 
@@ -427,7 +427,7 @@ exports.deleteCandidate = async (req, res) => {
 
         res.json({
             success: true,
-            message: "تم حذف المرشح بنجاح"
+            message: "Candidate deleted successfully"
         });
 
     } catch (err) {
@@ -528,7 +528,7 @@ exports.addParty = async (req, res) => {
         if (!party_name || !leader_name) {
             return res.status(400).json({
                 success: false,
-                message: "اسم الحزب واسم الزعيم مطلوبان"
+                message: "Party name and leader name are required"
             });
         }
 
@@ -542,7 +542,7 @@ exports.addParty = async (req, res) => {
 
         res.status(201).json({
             success: true,
-            message: "تم إضافة الحزب بنجاح",
+            message: "Party added successfully",
             data: rows[0]
         });
 
@@ -576,7 +576,7 @@ exports.editParty = async (req, res) => {
 
         res.json({
             success: true,
-            message: "تم تعديل الحزب بنجاح",
+            message: "Party updated successfully",
             data: rows[0]
         });
 
@@ -597,7 +597,7 @@ exports.deleteParty = async (req, res) => {
 
         res.json({
             success: true,
-            message: "تم حذف الحزب بنجاح"
+            message: "Party deleted successfully"
         });
 
     } catch (err) {
@@ -618,7 +618,7 @@ exports.getElectionResults = async (req, res) => {
         if (electionRows.length === 0) {
             return res.status(404).json({
                 success: false,
-                message: "لا توجد انتخابات"
+                message: "No elections found"
             });
         }
 
@@ -669,13 +669,11 @@ exports.decideElectionGroup = async (req, res) => {
         if (!decision || !['approved', 'refused'].includes(decision)) {
             return res.status(400).json({
                 success: false,
-                message: "يرجى إدخال القرار: approved أو refused"
+                message: "Please provide a valid decision: approved or refused"
             });
         }
 
-        ////////////////////////////////////////////////////////////
-        // ✅ 1️⃣ هات آخر دورة انتخابية مفتوحة
-        ////////////////////////////////////////////////////////////
+        // ✅ هات آخر group مفتوح
         const { rows: groupRows } = await pool.query(
             `SELECT group_id
              FROM election_groups
@@ -687,27 +685,21 @@ exports.decideElectionGroup = async (req, res) => {
         if (groupRows.length === 0) {
             return res.status(404).json({
                 success: false,
-                message: "لا توجد دورة انتخابية مفتوحة حالياً"
+                message: "No open election cycle found"
             });
         }
 
         const groupId = groupRows[0].group_id;
 
-        ////////////////////////////////////////////////////////////
-        // ✅ 2️⃣ تحديث الانتخابات داخل الجروب
-        // 🔥 أهم تعديل: إيقاف الانتخابات
-        ////////////////////////////////////////////////////////////
+        // ✅ حدّث كل الانتخابات داخل الجروب
         await pool.query(
-    `UPDATE elections
-     SET result_status = $1,
-         is_active = FALSE
-     WHERE election_group_id = $2`,
-    [decision, groupId]
-);
+            `UPDATE elections
+             SET result_status = $1
+             WHERE election_group_id = $2`,
+            [decision, groupId]
+        );
 
-        ////////////////////////////////////////////////////////////
-        // ✅ 3️⃣ إغلاق الجروب
-        ////////////////////////////////////////////////////////////
+        // ✅ اقفل الجروب
         await pool.query(
             `UPDATE election_groups
              SET is_closed = TRUE
@@ -715,22 +707,19 @@ exports.decideElectionGroup = async (req, res) => {
             [groupId]
         );
 
-        ////////////////////////////////////////////////////////////
-        // ✅ 4️⃣ الرد النهائي
-        ////////////////////////////////////////////////////////////
-        return res.json({
+        res.json({
             success: true,
             message:
                 decision === 'approved'
-                    ? "تم اعتماد نتيجة الدورة الانتخابية ✅ وتم إيقاف التصويت"
-                    : "تم رفض الدورة الانتخابية ❌ وتم إيقاف التصويت"
+                    ? "Election cycle approved successfully ✅"
+                    : "Election cycle refused ❌ A new cycle can now be started"
         });
 
     } catch (err) {
         console.error("Decision Error:", err.message);
-        return res.status(500).json({
+        res.status(500).json({
             success: false,
-            message: "حدث خطأ أثناء تحديث حالة الدورة"
+            message: "An error occurred while updating the election cycle status"
         });
     }
 };

@@ -2,7 +2,7 @@ const Vote = require('../models/voteModel');
 const { pool } = require('../config/db');
 
 ////////////////////////////////////////////////////////////
-// --- 1. تنفيذ التصويت ---
+// --- 1. Cast Vote ---
 ////////////////////////////////////////////////////////////
 exports.castVote = async (req, res) => {
     try {
@@ -12,11 +12,11 @@ exports.castVote = async (req, res) => {
         if (!candidate_id) {
             return res.status(400).json({
                 success: false,
-                message: "يرجى اختيار مرشح للتصويت له"
+                message: "Please select a candidate to vote for"
             });
         }
 
-        // ✅ التحقق من وجود انتخابات نشطة
+        // ✅ Check for active election
         const { rows: electionRows } = await pool.query(
             `SELECT election_id
              FROM elections
@@ -32,7 +32,7 @@ exports.castVote = async (req, res) => {
         if (electionRows.length === 0) {
             return res.status(403).json({
                 success: false,
-                message: "لا توجد انتخابات نشطة حالياً"
+                message: "There are no active elections at the moment"
             });
         }
 
@@ -45,7 +45,7 @@ exports.castVote = async (req, res) => {
         if (status && status.has_voted) {
             return res.status(400).json({
                 success: false,
-                message: "عذراً، لقد قمت بالتصويت بالفعل سابقاً"
+                message: "You have already voted previously"
             });
         }
 
@@ -62,7 +62,7 @@ exports.castVote = async (req, res) => {
 
         res.status(200).json({
             success: true,
-            message: "تم تسجيل صوتك بنجاح! شكراً لمشاركتك.",
+            message: "Your vote has been successfully recorded. Thank you for participating.",
             vote_card: voteCard
         });
 
@@ -70,13 +70,13 @@ exports.castVote = async (req, res) => {
         console.error("Cast Vote Error:", err.message);
         res.status(500).json({
             success: false,
-            message: "حدث خطأ داخلي أثناء تسجيل الصوت"
+            message: "An internal error occurred while recording your vote"
         });
     }
 };
 
 ////////////////////////////////////////////////////////////
-// --- 2. التحقق من حالة التصويت ---
+// --- 2. Check Voting Status ---
 ////////////////////////////////////////////////////////////
 exports.checkUserVotingStatus = async (req, res) => {
     try {
@@ -93,12 +93,15 @@ exports.checkUserVotingStatus = async (req, res) => {
 
     } catch (err) {
         console.error("Check Status Error:", err.message);
-        res.status(500).json({ success: false, message: "خطأ في جلب حالة التصويت" });
+        res.status(500).json({ 
+            success: false, 
+            message: "Error retrieving voting status" 
+        });
     }
 };
 
 ////////////////////////////////////////////////////////////
-// --- 3. جلب الـ Vote Card ---
+// --- 3. Get Vote Card ---
 ////////////////////////////////////////////////////////////
 exports.getVoteCard = async (req, res) => {
     try {
@@ -108,7 +111,7 @@ exports.getVoteCard = async (req, res) => {
         if (!voteCard) {
             return res.status(404).json({
                 success: false,
-                message: "لم يتم التصويت بعد"
+                message: "No vote has been recorded yet"
             });
         }
 
@@ -116,18 +119,21 @@ exports.getVoteCard = async (req, res) => {
 
     } catch (err) {
         console.error("Vote Card Error:", err.message);
-        res.status(500).json({ success: false, message: "خطأ في جلب بيانات الكارت" });
+        res.status(500).json({ 
+            success: false, 
+            message: "Error retrieving vote card data" 
+        });
     }
 };
 
 ////////////////////////////////////////////////////////////
-// --- 4. نتائج الانتخابات ---
+// --- 4. Election Results ---
 ////////////////////////////////////////////////////////////
 exports.getResults = async (req, res) => {
     try {
 
         ////////////////////////////////////////////////////////////
-        // ✅ 1️⃣ آخر دورة approved
+        // ✅ 1️⃣ Get latest approved election group
         ////////////////////////////////////////////////////////////
         const { rows: groupRows } = await pool.query(
             `SELECT eg.group_id
@@ -142,14 +148,14 @@ exports.getResults = async (req, res) => {
         if (groupRows.length === 0) {
             return res.status(403).json({
                 success: false,
-                message: "النتائج قيد المراجعة من قِبل اللجنة الانتخابية"
+                message: "Results are currently under review by the election committee"
             });
         }
 
         const groupId = groupRows[0].group_id;
 
         ////////////////////////////////////////////////////////////
-        // ✅ 2️⃣ إجمالي الأصوات لنفس الدورة فقط
+        // ✅ 2️⃣ Total votes for this election group
         ////////////////////////////////////////////////////////////
         const { rows: totalVotesRows } = await pool.query(
             `SELECT COUNT(v.vote_id)::INT AS total_votes
@@ -163,7 +169,7 @@ exports.getResults = async (req, res) => {
         const totalVotes = totalVotesRows[0]?.total_votes || 0;
 
         ////////////////////////////////////////////////////////////
-        // ✅ 3️⃣ عدد المرشحين المعتمدين
+        // ✅ 3️⃣ Total approved candidates
         ////////////////////////////////////////////////////////////
         const { rows: candidatesCountRows } = await pool.query(
             `SELECT COUNT(*)::INT AS total_candidates
@@ -174,7 +180,7 @@ exports.getResults = async (req, res) => {
         const totalCandidates = candidatesCountRows[0]?.total_candidates || 0;
 
         ////////////////////////////////////////////////////////////
-        // ✅ 4️⃣ النتائج الصحيحة (التعديل هنا ✅)
+        // ✅ 4️⃣ Final Results
         ////////////////////////////////////////////////////////////
         const { rows } = await pool.query(
             `SELECT 
@@ -214,7 +220,7 @@ exports.getResults = async (req, res) => {
         );
 
         ////////////////////////////////////////////////////////////
-        // ✅ 5️⃣ تحديد الفائز
+        // ✅ 5️⃣ Determine Winner
         ////////////////////////////////////////////////////////////
         const winner = rows.length > 0 ? rows[0] : null;
 
@@ -241,7 +247,7 @@ exports.getResults = async (req, res) => {
         console.error("Results Error:", err.message);
         return res.status(500).json({
             success: false,
-            message: "خطأ في جلب النتائج"
+            message: "Error retrieving election results"
         });
     }
 };

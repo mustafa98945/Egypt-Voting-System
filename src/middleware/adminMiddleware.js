@@ -7,7 +7,7 @@ const adminMiddleware = (req, res, next) => {
         if (!authHeader || !authHeader.startsWith('Bearer ')) {
             return res.status(401).json({
                 success: false,
-                message: "دخول غير مصرح به"
+                message: "Unauthorized access"
             });
         }
 
@@ -17,7 +17,7 @@ const adminMiddleware = (req, res, next) => {
         if (decoded.role !== 'admin') {
             return res.status(403).json({
                 success: false,
-                message: "غير مصرح لك بالدخول"
+                message: "Access denied"
             });
         }
 
@@ -35,13 +35,13 @@ const adminMiddleware = (req, res, next) => {
         if (err.name === 'TokenExpiredError') {
             return res.status(401).json({
                 success: false,
-                message: "انتهت صلاحية الجلسة"
+                message: "Session has expired"
             });
         }
 
         return res.status(403).json({
             success: false,
-            message: "جلسة غير صالحة"
+            message: "Invalid session"
         });
     }
 };

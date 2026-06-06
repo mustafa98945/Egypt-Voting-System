@@ -4,33 +4,33 @@ const authMiddleware = (req, res, next) => {
     try {
         const authHeader = req.headers['authorization'];
 
-        // ✅ التحقق من وجود التوكن
+        // ✅ Check if token exists
         if (!authHeader || !authHeader.startsWith('Bearer ')) {
             return res.status(401).json({
                 success: false,
-                message: "يرجى تسجيل الدخول أولاً"
+                message: "Please log in first"
             });
         }
 
         const token = authHeader.split(' ')[1];
 
-        // ✅ فك التوكن
+        // ✅ Verify token
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
         if (!decoded.id || !decoded.role) {
             return res.status(403).json({
                 success: false,
-                message: "بيانات التوكن غير صالحة"
+                message: "Invalid token data"
             });
         }
 
-        // ✅ تمرير البيانات كاملة للـ Controllers
+        // ✅ Pass full user data to Controllers
         req.user = {
             id: decoded.id,
             role: decoded.role,
             national_id: decoded.national_id || null,
             administrative_unit: decoded.administrative_unit || null,
-            governorate: decoded.governorate || null   // ✅ تمت الإضافة هنا
+            governorate: decoded.governorate || null
         };
 
         next();
@@ -41,13 +41,13 @@ const authMiddleware = (req, res, next) => {
         if (err.name === 'TokenExpiredError') {
             return res.status(401).json({
                 success: false,
-                message: "انتهت صلاحية الجلسة، يرجى تسجيل الدخول مرة أخرى"
+                message: "Session has expired, please log in again"
             });
         }
 
         return res.status(403).json({
             success: false,
-            message: "جلسة الدخول غير صالحة"
+            message: "Invalid login session"
         });
     }
 };

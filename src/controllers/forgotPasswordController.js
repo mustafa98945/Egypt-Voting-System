@@ -48,7 +48,7 @@ const sendInBackground = (mailOptions) => {
 };
 
 ////////////////////////////////////////////////////////////
-// ✅ 1️⃣ Send OTP (4 DIGITS)
+// ✅ 1️⃣ Send OTP
 ////////////////////////////////////////////////////////////
 
 exports.sendOTP = async (req, res) => {
@@ -58,7 +58,7 @@ exports.sendOTP = async (req, res) => {
         if (!email) {
             return res.status(400).json({
                 success: false,
-                message: "يرجى إدخال البريد الإلكتروني"
+                message: "Please enter your email address"
             });
         }
 
@@ -75,11 +75,10 @@ exports.sendOTP = async (req, res) => {
         if (voter.rows.length === 0 && candidate.rows.length === 0) {
             return res.status(404).json({
                 success: false,
-                message: "البريد الإلكتروني غير مسجل"
+                message: "Email is not registered"
             });
         }
 
-        // ✅ OTP 4 أرقام فقط
         const otp = Math.floor(1000 + Math.random() * 9000).toString();
 
         const expiresAt = new Date();
@@ -91,10 +90,9 @@ exports.sendOTP = async (req, res) => {
             [email, otp, expiresAt]
         );
 
-        // ✅ رجّع Response فورًا
         res.json({
             success: true,
-            message: "تم إرسال رمز التحقق"
+            message: "Verification code has been sent"
         });
 
         const mailOptions = {
@@ -116,7 +114,7 @@ exports.sendOTP = async (req, res) => {
         console.error("Send OTP Error:", err.message);
         return res.status(500).json({
             success: false,
-            message: "حدث خطأ أثناء إرسال الرمز"
+            message: "An error occurred while sending the verification code"
         });
     }
 };
@@ -132,7 +130,7 @@ exports.verifyOTP = async (req, res) => {
         if (!otp) {
             return res.status(400).json({
                 success: false,
-                message: "يرجى إدخال الرمز"
+                message: "Please enter the verification code"
             });
         }
 
@@ -149,7 +147,7 @@ exports.verifyOTP = async (req, res) => {
         if (rows.length === 0) {
             return res.status(400).json({
                 success: false,
-                message: "الرمز غير صحيح أو منتهي"
+                message: "Invalid or expired verification code"
             });
         }
 
@@ -160,14 +158,14 @@ exports.verifyOTP = async (req, res) => {
 
         return res.json({
             success: true,
-            message: "تم التحقق بنجاح"
+            message: "Verification successful"
         });
 
     } catch (err) {
         console.error("Verify OTP Error:", err.message);
         return res.status(500).json({
             success: false,
-            message: "حدث خطأ أثناء التحقق"
+            message: "An error occurred during verification"
         });
     }
 };
@@ -183,14 +181,14 @@ exports.resetPassword = async (req, res) => {
         if (!password || !confirm_password) {
             return res.status(400).json({
                 success: false,
-                message: "يرجى إدخال كلمة المرور"
+                message: "Please enter your password"
             });
         }
 
         if (password !== confirm_password) {
             return res.status(400).json({
                 success: false,
-                message: "كلمتا المرور غير متطابقتين"
+                message: "Passwords do not match"
             });
         }
 
@@ -204,7 +202,7 @@ exports.resetPassword = async (req, res) => {
         if (rows.length === 0) {
             return res.status(400).json({
                 success: false,
-                message: "لم يتم التحقق من الرمز"
+                message: "Verification code has not been confirmed"
             });
         }
 
@@ -223,13 +221,14 @@ exports.resetPassword = async (req, res) => {
 
         return res.json({
             success: true,
-            message: "تم تغيير كلمة المرور بنجاح"
+            message: "Password has been reset successfully"
         });
+
     } catch (err) {
         console.error("Reset Password Error:", err.message);
         return res.status(500).json({
             success: false,
-            message: "حدث خطأ أثناء تغيير كلمة المرور"
+            message: "An error occurred while resetting the password"
         });
     }
 };

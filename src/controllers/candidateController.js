@@ -48,7 +48,7 @@ exports.verifyBeforeRegister = async (req, res) => {
         if (!citizen) {
             return res.status(401).json({
                 success: false,
-                message: "بيانات الهوية غير صحيحة"
+                message: "Invalid identity information"
             });
         }
 
@@ -56,7 +56,7 @@ exports.verifyBeforeRegister = async (req, res) => {
         if (citizen.age < 18) {
             return res.status(400).json({
                 success: false,
-                message: "يجب أن يكون عمرك 18 سنة أو أكثر للتسجيل"
+                message: "You must be at least 18 years old to register"
             });
         }
 
@@ -103,7 +103,7 @@ exports.registerCandidate = async (req, res) => {
         if (!citizen) {
             return res.status(401).json({
                 success: false,
-                message: "فشل التحقق"
+                message: "Verification failed"
             });
         }
 
@@ -111,7 +111,7 @@ exports.registerCandidate = async (req, res) => {
         if (citizen.age < 18) {
             return res.status(400).json({
                 success: false,
-                message: "يجب أن يكون العمر 18 سنة أو أكثر للتسجيل"
+                message: "You must be at least 18 years old to register"
             });
         }
 
@@ -161,7 +161,7 @@ exports.registerCandidate = async (req, res) => {
 
         return res.status(201).json({
             success: true,
-            message: "تم تسجيل المرشح بنجاح",
+            message: "Candidate registered successfully",
             data: { candidate_id: newCandidate.candidate_id }
         });
 
@@ -202,7 +202,7 @@ exports.loginCandidate = async (req, res) => {
                 if (!isMatch) {
                     return res.status(401).json({
                         success: false,
-                        message: "كلمة المرور غير صحيحة"
+                        message: "Incorrect password"
                     });
                 }
             }
@@ -214,7 +214,7 @@ exports.loginCandidate = async (req, res) => {
         else {
             return res.status(400).json({
                 success: false,
-                message: "يرجى إدخال بيانات الدخول"
+                message: "Please enter login credentials"
             });
         }
 
@@ -224,7 +224,7 @@ exports.loginCandidate = async (req, res) => {
         if (!candidate) {
             return res.status(404).json({
                 success: false,
-                message: "الحساب غير موجود"
+                message: "Account not found"
             });
         }
 
@@ -234,14 +234,14 @@ exports.loginCandidate = async (req, res) => {
         if (candidate.is_approved === false) {
             return res.status(403).json({
                 success: false,
-                message: "تم رفض طلب ترشحك"
+                message: "Your candidacy request has been rejected"
             });
         }
 
         if (candidate.is_approved === null) {
             return res.status(403).json({
                 success: false,
-                message: "طلبك قيد المراجعة، يرجى الانتظار"
+                message: "Your request is under review, please wait"
             });
         }
 
@@ -292,7 +292,7 @@ exports.listCandidates = async (req, res) => {
         if (!userUnit || !userGov) {
             return res.status(400).json({
                 success: false,
-                message: "بيانات المستخدم غير مكتملة"
+                message: "User data is incomplete"
             });
         }
 
@@ -312,7 +312,7 @@ exports.listCandidates = async (req, res) => {
         if (electionRows.length === 0) {
             return res.status(403).json({
                 success: false,
-                message: "لا توجد انتخابات نشطة لمحافظتك حالياً"
+                message: "There are no active elections in your governorate at the moment"
             });
         }
 
@@ -349,7 +349,7 @@ exports.listCandidates = async (req, res) => {
         console.error("List Candidates Error:", err);
         res.status(500).json({
             success: false,
-            message: "خطأ في تحميل القائمة"
+            message: "Error loading candidates list"
         });
     }
 };
