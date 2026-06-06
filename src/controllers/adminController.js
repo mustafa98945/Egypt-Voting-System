@@ -437,58 +437,33 @@ exports.deleteCandidate = async (req, res) => {
 
 exports.getDashboardStats = async (req, res) => {
     try {
+        const { rows } = await queryWithRetry(
+            `SELECT 
+                -- ✅ عدد المشاركين في التصويت (voters + candidates)
+                (
+                    SELECT COUNT(DISTINCT voter_id)
+                    FROM votes
+                ) AS total_voters,
 
-        ////////////////////////////////////////////////////////////
-        // ✅ Get latest election group (open or closed)
-        ////////////////////////////////////////////////////////////
-        const { rows: groupRows } = await pool.query(
-            `SELECT group_id
-             FROM election_groups
-             ORDER BY created_at DESC
-             LIMIT 1`
+                -- ✅ عدد المرشحين المقبولين
+                (
+                    SELECT COUNT(*)
+                    FROM candidates
+                    WHERE is_approved = TRUE
+                ) AS total_candidates
+            `
         );
-
-        let totalVoters = 0;
-
-        if (groupRows.length > 0) {
-            const groupId = groupRows[0].group_id;
-
-            const { rows: voterRows } = await pool.query(
-                `SELECT COUNT(*)::INT AS total_voters
-                 FROM votes v
-                 JOIN elections e
-                   ON v.election_id = e.election_id
-                 WHERE e.election_group_id = $1`,
-                [groupId]
-            );
-
-            totalVoters = voterRows[0]?.total_voters || 0;
-        }
-
-        ////////////////////////////////////////////////////////////
-        // ✅ Count ALL approved candidates
-        ////////////////////////////////////////////////////////////
-        const { rows: candidateRows } = await pool.query(
-            `SELECT COUNT(*)::INT AS total_candidates
-             FROM candidates
-             WHERE is_approved = TRUE`
-        );
-
-        const totalCandidates = candidateRows[0]?.total_candidates || 0;
 
         res.json({
             success: true,
             data: {
-                voters: totalVoters,
-                candidates: totalCandidates
+                voters: rows[0].total_voters,
+                candidates: rows[0].total_candidates
             }
         });
 
     } catch (err) {
-        res.status(500).json({
-            success: false,
-            message: err.message
-        });
+        res.status(500).json({ success: false, message: err.message });
     }
 };
 exports.getElectoralDistricts = async (req, res) => {
@@ -633,91 +608,59 @@ exports.deleteParty = async (req, res) => {
 // --- 1. نتايج الانتخابات للـ Admin ---
 exports.getElectionResults = async (req, res) => {
     try {
-
-        // ✅ 1️⃣ Get latest election group
-        const { rows: groupRows } = await pool.query(
-            `SELECT group_id
-             FROM election_groups
-             ORDER BY created_at DESC
+        // جلب آخر انتخابات
+        const { rows: electionRows } = await queryWithRetry(
+            `SELECT * FROM elections 
+             ORDER BY created_at DESC 
              LIMIT 1`
         );
 
-        if (groupRows.length === 0) {
-            return res.json({
-                success: true,
-                election: null,
-                voters: 0,
-                summary: { total_votes: 0, total_candidates: 0 },
-                data: []
+        if (electionRows.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: "No elections found"
             });
         }
 
-        const groupId = groupRows[0].group_id;
+        const election = electionRows[0];
 
-        // ✅ 2️⃣ Get election info
-        const { rows: electionRows } = await pool.query(
-            `SELECT e.election_id, e.election_name,
-                    e.start_date, e.end_date,
-                    e.result_status, e.logo_url
-             FROM elections e
-             WHERE e.election_group_id = $1
-             ORDER BY e.created_at DESC
-             LIMIT 1`,
-            [groupId]
-        );
-
-        const election = electionRows[0] || null;
-
-        // ✅ 3️⃣ Count total votes (بدون election_id)
-        const { rows: voteRows } = await pool.query(
-            `SELECT COUNT(*)::INT AS total_votes FROM votes`
-        );
-
-        const totalVotes = voteRows[0]?.total_votes || 0;
-
-        // ✅ 4️⃣ Get ALL approved candidates with votes
-        const { rows } = await pool.query(
+        // جلب النتايج مرتبة من الأعلى تصويتاً
+        const { rows } = await queryWithRetry(
             `SELECT 
                 c.candidate_id,
                 cr.full_name,
                 c.personal_photos_url,
                 c.candidate_type,
-                c.election_symbol_url,
                 COUNT(v.vote_id)::INT AS total_votes
              FROM candidates c
-             LEFT JOIN civil_registry cr
+             LEFT JOIN civil_registry cr 
                ON TRIM(c.national_id) = TRIM(cr.national_id)
-             LEFT JOIN votes v
+             LEFT JOIN votes v 
                ON c.candidate_id = v.candidate_id
              WHERE c.is_approved = TRUE
              GROUP BY 
-                c.candidate_id, cr.full_name,
-                c.personal_photos_url,
-                c.candidate_type,
-                c.election_symbol_url
+                c.candidate_id, cr.full_name, 
+                c.personal_photos_url, c.candidate_type
              ORDER BY total_votes DESC`
         );
 
-        // ✅ 5️⃣ Response
         res.json({
             success: true,
-            election: election,
-            voters: totalVotes,
-            summary: {
-                total_votes: totalVotes,
-                total_candidates: rows.length
+            election: {
+                id: election.election_id,
+                name: election.election_name,
+                start_date: election.start_date,
+                end_date: election.end_date,
+                result_status: election.result_status
             },
             data: rows
         });
 
     } catch (err) {
-        console.error("Get Election Results Error:", err.message);
-        res.status(500).json({
-            success: false,
-            message: err.message
-        });
+        res.status(500).json({ success: false, message: err.message });
     }
 };
+
 // --- 2. اعتماد أو إبطال النتيجة ---
 exports.decideElectionGroup = async (req, res) => {
     try {
@@ -726,10 +669,11 @@ exports.decideElectionGroup = async (req, res) => {
         if (!decision || !['approved', 'refused'].includes(decision)) {
             return res.status(400).json({
                 success: false,
-                message: "Invalid decision"
+                message: "Please provide a valid decision: approved or refused"
             });
         }
 
+        // ✅ هات آخر group مفتوح
         const { rows: groupRows } = await pool.query(
             `SELECT group_id
              FROM election_groups
@@ -747,14 +691,15 @@ exports.decideElectionGroup = async (req, res) => {
 
         const groupId = groupRows[0].group_id;
 
+        // ✅ حدّث كل الانتخابات داخل الجروب
         await pool.query(
             `UPDATE elections
-             SET result_status = $1,
-                 is_active = FALSE
+             SET result_status = $1
              WHERE election_group_id = $2`,
             [decision, groupId]
         );
 
+        // ✅ اقفل الجروب
         await pool.query(
             `UPDATE election_groups
              SET is_closed = TRUE
@@ -764,95 +709,17 @@ exports.decideElectionGroup = async (req, res) => {
 
         res.json({
             success: true,
-            message: "Election cycle updated ✅"
+            message:
+                decision === 'approved'
+                    ? "Election cycle approved successfully ✅"
+                    : "Election cycle refused ❌ A new cycle can now be started"
         });
 
     } catch (err) {
-        console.error("Decision Error:", err);
+        console.error("Decision Error:", err.message);
         res.status(500).json({
             success: false,
-            message: err.message
-        });
-    }
-};
-exports.getVotersStatus = async (req, res) => {
-    try {
-
-        ////////////////////////////////////////////////////////////
-        // ✅ تحديد الانتخابات النشطة
-        ////////////////////////////////////////////////////////////
-        const { rows: electionRows } = await pool.query(`
-            SELECT e.election_id
-            FROM elections e
-            JOIN election_groups eg 
-              ON e.election_group_id = eg.group_id
-            WHERE eg.is_closed = FALSE
-            AND CURRENT_TIMESTAMP BETWEEN e.start_date AND e.end_date
-            ORDER BY e.created_at DESC
-            LIMIT 1
-        `);
-
-        if (electionRows.length === 0) {
-            return res.json({
-                success: true,
-                data: []
-            });
-        }
-
-        const electionId = electionRows[0].election_id;
-
-        ////////////////////////////////////////////////////////////
-        // ✅ جلب كل المواطنين فوق 18 سنة
-        ////////////////////////////////////////////////////////////
-        const { rows } = await pool.query(
-            `
-            SELECT 
-                ROW_NUMBER() OVER (ORDER BY cr.national_id) AS voter_number,
-                cr.national_id AS v_national_id,
-                cr.full_name AS v_name,
-
-                COALESCE(cr_candidate.full_name, 'Has Not Voted Yet') AS voted_for,
-
-                CASE 
-                    WHEN v.vote_id IS NOT NULL
-                    THEN 'Voted'
-                    ELSE 'Not Voted Yet'
-                END AS status
-
-            FROM civil_registry cr
-
-            LEFT JOIN voters vt
-                ON TRIM(vt.national_id) = TRIM(cr.national_id)
-
-            LEFT JOIN votes v
-                ON vt.voter_id = v.voter_id
-                AND v.election_id = $1
-
-            LEFT JOIN candidates c
-                ON v.candidate_id = c.candidate_id
-
-            LEFT JOIN civil_registry cr_candidate
-                ON TRIM(c.national_id) = TRIM(cr_candidate.national_id)
-
-            WHERE DATE_PART('year', AGE(CURRENT_DATE, cr.birth_date)) >= 18
-
-            ORDER BY voter_number ASC
-            `,
-            [electionId]
-        );
-
-        res.json({
-            success: true,
-            election_id: electionId,
-            total_people: rows.length,
-            data: rows
-        });
-
-    } catch (err) {
-        console.error("GetVotersStatus Error:", err);
-        res.status(500).json({
-            success: false,
-            message: err.message
+            message: "An error occurred while updating the election cycle status"
         });
     }
 };
@@ -860,26 +727,49 @@ exports.getVotesData = async (req, res) => {
     try {
         const { rows } = await queryWithRetry(
             `SELECT 
-                COALESCE(v.vote_id, 0)                     AS vote_id,
-                COALESCE(v.voter_id, 0)                    AS voter_id,
-                COALESCE(v.voter_role, '')                 AS voter_role,
-                COALESCE(v.candidate_id, 0)                AS candidate_id,
-                COALESCE(v.election_id, 0)                 AS election_id,
-                COALESCE(cr_voter.full_name, '')           AS voter_name,
-                COALESCE(cr_candidate.full_name, '')       AS candidate_name,
-                COALESCE(e.election_name, '')              AS election_name,
-                v.created_at
+                v.vote_id AS v_code,
+                v.created_at::TIME       AS time,
+                v.created_at::DATE       AS data,
+                COALESCE(
+                    cr_voter.national_id, 
+                    cr_candidate_voter.national_id
+                ) AS v_national_id,
+                COALESCE(
+                    cr_voter.full_name, 
+                    cr_candidate_voter.full_name
+                ) AS voter_name,
+                e.election_name          AS election_name,
+                cr_candidate.national_id AS c_national_id,
+                cr_candidate.full_name   AS candidate_name
              FROM votes v
-             LEFT JOIN voters vt
-               ON v.voter_id = vt.voter_id
-             LEFT JOIN civil_registry cr_voter
+             -- لو voter
+             LEFT JOIN voters vt 
+               ON v.voter_id = vt.voter_id 
+               AND v.voter_role = 'voter'
+             LEFT JOIN civil_registry cr_voter 
                ON TRIM(vt.national_id) = TRIM(cr_voter.national_id)
-             LEFT JOIN candidates c
+             -- لو candidate بيصوت
+             LEFT JOIN candidates cd_voter
+               ON v.voter_id = cd_voter.candidate_id 
+               AND v.voter_role = 'candidate'
+             LEFT JOIN civil_registry cr_candidate_voter 
+               ON TRIM(cd_voter.national_id) = TRIM(cr_candidate_voter.national_id)
+             -- بيانات المرشح المصوت له
+             LEFT JOIN candidates c 
                ON v.candidate_id = c.candidate_id
-             LEFT JOIN civil_registry cr_candidate
+             LEFT JOIN civil_registry cr_candidate 
                ON TRIM(c.national_id) = TRIM(cr_candidate.national_id)
-             LEFT JOIN elections e
-               ON v.election_id = e.election_id
+             -- بيانات الانتخابات
+             LEFT JOIN elections e 
+               ON e.election_id = (
+                   SELECT election_id FROM elections 
+                   ORDER BY created_at DESC LIMIT 1
+               )
+             WHERE cr_candidate.national_id IS NOT NULL
+             AND COALESCE(
+                 cr_voter.national_id, 
+                 cr_candidate_voter.national_id
+             ) IS NOT NULL
              ORDER BY v.created_at DESC`
         );
 
@@ -890,10 +780,75 @@ exports.getVotesData = async (req, res) => {
         });
 
     } catch (err) {
-        console.error("GetVotesData Error:", err);
-        res.status(500).json({
-            success: false,
-            message: err.message
+        res.status(500).json({ success: false, message: err.message });
+    }
+};
+
+exports.getVotersStatus = async (req, res) => {
+    try {
+        const { rows } = await queryWithRetry(
+            `-- Voters
+             SELECT 
+                ROW_NUMBER() OVER (ORDER BY vt.voter_id) AS voter_number,
+                vt.national_id                           AS v_national_id,
+                cr_voter.full_name                       AS v_name,
+                'voter'                                  AS role,
+                CASE 
+                    WHEN vt.has_voted = TRUE THEN cr_candidate.full_name
+                    ELSE 'Has Not Voted Yet'
+                END AS voted_for,
+                CASE 
+                    WHEN vt.has_voted = TRUE THEN 'Voted'
+                    ELSE 'Not Voted Yet'
+                END AS status
+             FROM voters vt
+             LEFT JOIN civil_registry cr_voter 
+               ON TRIM(vt.national_id) = TRIM(cr_voter.national_id)
+             LEFT JOIN votes v 
+               ON vt.voter_id = v.voter_id
+             LEFT JOIN candidates c 
+               ON v.candidate_id = c.candidate_id
+             LEFT JOIN civil_registry cr_candidate 
+               ON TRIM(c.national_id) = TRIM(cr_candidate.national_id)
+
+             UNION ALL
+
+             -- Candidates
+             SELECT 
+                ROW_NUMBER() OVER (ORDER BY cd.candidate_id) AS voter_number,
+                cd.national_id                               AS v_national_id,
+                cr_candidate.full_name                       AS v_name,
+                'candidate'                                  AS role,
+                CASE 
+                    WHEN cd.has_voted = TRUE THEN cr_voted_for.full_name
+                    ELSE 'Has Not Voted Yet'
+                END AS voted_for,
+                CASE 
+                    WHEN cd.has_voted = TRUE THEN 'Voted'
+                    ELSE 'Not Voted Yet'
+                END AS status
+             FROM candidates cd
+             LEFT JOIN civil_registry cr_candidate 
+               ON TRIM(cd.national_id) = TRIM(cr_candidate.national_id)
+             LEFT JOIN votes v 
+               ON cd.candidate_id = v.candidate_id 
+               AND v.voter_role = 'candidate'
+             LEFT JOIN candidates c_voted 
+               ON v.candidate_id = c_voted.candidate_id
+             LEFT JOIN civil_registry cr_voted_for 
+               ON TRIM(c_voted.national_id) = TRIM(cr_voted_for.national_id)
+             WHERE cd.is_approved = TRUE
+
+             ORDER BY role, voter_number ASC`
+        );
+
+        res.json({
+            success: true,
+            count: rows.length,
+            data: rows
         });
+
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
     }
 };
