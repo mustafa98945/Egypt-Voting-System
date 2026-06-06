@@ -208,15 +208,16 @@ exports.getResults = async (req, res) => {
     try {
         const { governorate } = req.user;
 
-        // ✅ جلب الانتخابات النشطة للمحافظة
+        ////////////////////////////////////////////////////////////
+        // ✅ 1️⃣ هات آخر انتخابات اتعملت للمحافظة (مش شرط تكون نشطة)
+        ////////////////////////////////////////////////////////////
         const { rows: electionRows } = await pool.query(
-            `SELECT e.election_id, eg.group_id
+            `SELECT e.election_id, e.election_group_id
              FROM elections e
-             JOIN election_groups eg ON e.election_group_id = eg.group_id
-             WHERE eg.is_closed = FALSE
-             AND TRIM(e.governorate) = TRIM($1)
-             AND CURRENT_TIMESTAMP BETWEEN e.start_date AND e.end_date
-             ORDER BY e.created_at DESC
+             JOIN election_groups eg 
+               ON e.election_group_id = eg.group_id
+             WHERE TRIM(e.governorate) = TRIM($1)
+             ORDER BY eg.created_at DESC, e.created_at DESC
              LIMIT 1`,
             [governorate]
         );
@@ -224,7 +225,7 @@ exports.getResults = async (req, res) => {
         if (electionRows.length === 0) {
             return res.json({
                 success: true,
-                election: null,
+                election_id: null,
                 summary: {
                     total_votes: 0,
                     total_candidates: 0
@@ -234,19 +235,22 @@ exports.getResults = async (req, res) => {
         }
 
         const electionId = electionRows[0].election_id;
-        const groupId = electionRows[0].group_id;
 
-        // ✅ إحصاء الأصوات للانتخابات المحددة فقط
+        ////////////////////////////////////////////////////////////
+        // ✅ 2️⃣ إجمالي الأصوات للانتخابات دي
+        ////////////////////////////////////////////////////////////
         const { rows: totalVotesRows } = await pool.query(
-            `SELECT COUNT(v.vote_id)::INT AS total_votes
-             FROM votes v
-             WHERE v.election_id = $1`,
+            `SELECT COUNT(vote_id)::INT AS total_votes
+             FROM votes
+             WHERE election_id = $1`,
             [electionId]
         );
 
         const totalVotes = totalVotesRows[0]?.total_votes || 0;
 
-        // ✅ جلب المرشحين بأصواتهم
+        ////////////////////////////////////////////////////////////
+        // ✅ 3️⃣ جلب المرشحين وأصواتهم
+        ////////////////////////////////////////////////////////////
         const { rows } = await pool.query(
             `SELECT 
                 c.candidate_id,
@@ -260,12 +264,13 @@ exports.getResults = async (req, res) => {
                     ELSE ROUND((COUNT(v.vote_id) * 100.0) / $2, 2)
                 END AS percentage
              FROM candidates c
-             LEFT JOIN civil_registry cr ON TRIM(c.national_id) = TRIM(cr.national_id)
+             LEFT JOIN civil_registry cr 
+               ON TRIM(c.national_id) = TRIM(cr.national_id)
              LEFT JOIN votes v 
                ON c.candidate_id = v.candidate_id
                AND v.election_id = $1
              WHERE c.is_approved = TRUE
-             AND TRIM(c.governorate) = TRIM($3)
+             AND c.election_id = $1   -- ✅ مهم جداً
              GROUP BY 
                 c.candidate_id,
                 cr.full_name,
@@ -273,9 +278,12 @@ exports.getResults = async (req, res) => {
                 c.candidate_type,
                 c.election_symbol_url
              ORDER BY total_votes DESC`,
-            [electionId, totalVotes, governorate]
+            [electionId, totalVotes]
         );
 
+        ////////////////////////////////////////////////////////////
+        // ✅ 4️⃣ رجع النتيجة
+        ////////////////////////////////////////////////////////////
         return res.json({
             success: true,
             election_id: electionId,
