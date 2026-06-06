@@ -207,6 +207,9 @@ exports.getVoteCard = async (req, res) => {
 exports.getResults = async (req, res) => {
     try {
 
+        ////////////////////////////////////////////////////////////
+        // ✅ 1️⃣ هات آخر انتخابات approved
+        ////////////////////////////////////////////////////////////
         const { rows: electionRows } = await pool.query(
             `SELECT election_id
              FROM elections
@@ -229,6 +232,9 @@ exports.getResults = async (req, res) => {
 
         const electionId = electionRows[0].election_id;
 
+        ////////////////////////////////////////////////////////////
+        // ✅ 2️⃣ إجمالي الأصوات
+        ////////////////////////////////////////////////////////////
         const { rows: totalVotesRows } = await pool.query(
             `SELECT COUNT(*)::INT AS total_votes
              FROM votes
@@ -238,6 +244,9 @@ exports.getResults = async (req, res) => {
 
         const totalVotes = totalVotesRows[0]?.total_votes || 0;
 
+        ////////////////////////////////////////////////////////////
+        // ✅ 3️⃣ جلب كل المرشحين approved + أصواتهم
+        ////////////////////////////////////////////////////////////
         const { rows } = await pool.query(
             `SELECT 
                 c.candidate_id,
@@ -258,7 +267,6 @@ exports.getResults = async (req, res) => {
                ON c.candidate_id = v.candidate_id
                AND v.election_id = $1
              WHERE c.is_approved = TRUE
-             AND c.election_id = $1
              GROUP BY 
                 c.candidate_id,
                 cr.full_name,
@@ -270,6 +278,9 @@ exports.getResults = async (req, res) => {
             [electionId, totalVotes]
         );
 
+        ////////////////////////////////////////////////////////////
+        // ✅ 4️⃣ رجع البيانات
+        ////////////////////////////////////////////////////////////
         return res.json({
             success: true,
             election_id: electionId,
