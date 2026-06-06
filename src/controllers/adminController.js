@@ -838,8 +838,8 @@ exports.getVotersStatus = async (req, res) => {
         const { rows } = await pool.query(
             `SELECT 
                 vt.voter_id,
-                vt.national_id,
-                cr.full_name,
+                vt.national_id AS v_national_id,
+                cr.full_name AS v_name,
                 CASE 
                     WHEN EXISTS (
                         SELECT 1
