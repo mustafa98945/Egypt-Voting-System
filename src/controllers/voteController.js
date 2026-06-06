@@ -1,5 +1,5 @@
 const { pool } = require('../config/db');
-const Vote = require('../models/Vote');
+const Vote = require('../models/voteModel');
 
 ////////////////////////////////////////////////////////////
 // --- 1. Cast Vote ---
