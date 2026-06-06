@@ -8,10 +8,7 @@ const adminMiddleware = require('../middleware/adminMiddleware');
 // ✅ Authentication
 ////////////////////////////////////////////////////////////
 
-// Login (no token required)
 router.post('/login', adminController.login);
-
-// Logout (requires admin token)
 router.post('/logout', adminMiddleware, adminController.logout);
 
 ////////////////////////////////////////////////////////////
@@ -62,12 +59,9 @@ router.put('/group/decision', adminMiddleware, adminController.decideElectionGro
 // ✅ Candidate Management
 ////////////////////////////////////////////////////////////
 
-// Specific routes first
 router.get('/candidates/pending', adminMiddleware, adminController.getPendingCandidates);
 router.get('/candidates/accepted', adminMiddleware, adminController.getAcceptedCandidates);
 router.delete('/candidates/delete/:id', adminMiddleware, adminController.deleteCandidate);
-
-// Dynamic routes last
 router.get('/candidates/:id', adminMiddleware, adminController.getCandidateDetails);
 router.put('/candidates/:id/decision', adminMiddleware, adminController.decideCandidateApproval);
 
