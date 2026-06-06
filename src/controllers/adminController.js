@@ -854,3 +854,32 @@ exports.getVotersStatus = async (req, res) => {
         });
     }
 };
+
+exports.getVotesData = async (req, res) => {
+    try {
+        const { rows } = await pool.query(
+            `SELECT 
+                vote_id,
+                voter_id,
+                voter_role,
+                candidate_id,
+                election_id,
+                created_at
+             FROM votes
+             ORDER BY created_at DESC`
+        );
+
+        res.json({
+            success: true,
+            count: rows.length,
+            data: rows
+        });
+
+    } catch (err) {
+        console.error("GetVotesData Error:", err);
+        res.status(500).json({
+            success: false,
+            message: err.message
+        });
+    }
+};
