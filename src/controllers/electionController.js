@@ -194,22 +194,23 @@ exports.getElectionStatus = async (req, res) => {
     try {
         const { rows } = await pool.query(
             `SELECT 
-                election_id,
-                election_type,
-                election_name,
-                governorate,
-                logo_url,
-                start_date,
-                end_date,
+                e.election_id,
+                e.election_type,
+                e.election_name,
+                e.governorate,
+                e.logo_url,
+                e.start_date,
+                e.end_date,
                 CASE 
-                    WHEN CURRENT_TIMESTAMP < start_date THEN 'not_started'
-                    WHEN CURRENT_TIMESTAMP >= start_date 
-                         AND CURRENT_TIMESTAMP <= end_date THEN 'active'
+                    WHEN CURRENT_TIMESTAMP < e.start_date THEN 'not_started'
+                    WHEN CURRENT_TIMESTAMP BETWEEN e.start_date AND e.end_date THEN 'active'
                     ELSE 'ended'
                 END AS status
-             FROM elections
-             WHERE is_active = TRUE
-             ORDER BY created_at DESC
+             FROM elections e
+             JOIN election_groups eg
+               ON e.election_group_id = eg.group_id
+             WHERE eg.is_closed = FALSE
+             ORDER BY e.created_at DESC
              LIMIT 1`
         );
 
@@ -240,11 +241,12 @@ exports.getElectionStatus = async (req, res) => {
         });
 
     } catch (err) {
-        console.error("Election Status Error:", err);
-        res.status(500).json({ success: false, message: err.message });
+        res.status(500).json({
+            success: false,
+            message: err.message
+        });
     }
 };
-
 ////////////////////////////////////////////////////////////
 // ✅ 4. Get All Elections
 ////////////////////////////////////////////////////////////
@@ -276,7 +278,7 @@ exports.deleteElection = async (req, res) => {
     try {
         const { id } = req.params;
 
-        // ✅ نتأكد إن الانتخابات موجودة
+        // ✅ تأكد إن الانتخابات موجودة
         const { rows: electionRows } = await pool.query(
             'SELECT * FROM elections WHERE election_id = $1',
             [id]
@@ -291,27 +293,21 @@ exports.deleteElection = async (req, res) => {
 
         const groupId = electionRows[0].election_group_id;
 
-        ////////////////////////////////////////////////////////////
-        // ✅ 1️⃣ امسح الأصوات المرتبطة بالانتخابات
-        ////////////////////////////////////////////////////////////
+        // ✅ امسح الأصوات المرتبطة
         await pool.query(
             'DELETE FROM votes WHERE election_id = $1',
             [id]
         );
 
-        ////////////////////////////////////////////////////////////
-        // ✅ 2️⃣ امسح الانتخابات
-        ////////////////////////////////////////////////////////////
+        // ✅ امسح الانتخابات
         await pool.query(
             'DELETE FROM elections WHERE election_id = $1',
             [id]
         );
 
-        ////////////////////////////////////////////////////////////
-        // ✅ 3️⃣ لو مفيش انتخابات تانية في نفس الجروب امسح الجروب
-        ////////////////////////////////////////////////////////////
+        // ✅ لو الجروب فاضي امسحه
         const { rows: remaining } = await pool.query(
-            'SELECT * FROM elections WHERE election_group_id = $1',
+            'SELECT 1 FROM elections WHERE election_group_id = $1',
             [groupId]
         );
 
@@ -334,7 +330,6 @@ exports.deleteElection = async (req, res) => {
         });
     }
 };
-
 ////////////////////////////////////////////////////////////
 // ✅ Get Governorates
 ////////////////////////////////////////////////////////////

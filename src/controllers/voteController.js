@@ -16,15 +16,16 @@ exports.castVote = async (req, res) => {
             });
         }
 
-        // ✅ Check for active election
+        // ✅ التصويت يحصل فقط في آخر جروب مفتوحة
         const { rows: electionRows } = await pool.query(
-            `SELECT election_id
-             FROM elections
-             WHERE is_active = TRUE
-             AND TRIM(governorate) = TRIM($1)
-             AND CURRENT_TIMESTAMP >= start_date
-             AND CURRENT_TIMESTAMP <= end_date
-             ORDER BY created_at DESC
+            `SELECT e.election_id
+             FROM elections e
+             JOIN election_groups eg
+               ON e.election_group_id = eg.group_id
+             WHERE eg.is_closed = FALSE
+             AND TRIM(e.governorate) = TRIM($1)
+             AND CURRENT_TIMESTAMP BETWEEN e.start_date AND e.end_date
+             ORDER BY e.created_at DESC
              LIMIT 1`,
             [governorate]
         );
@@ -32,45 +33,43 @@ exports.castVote = async (req, res) => {
         if (electionRows.length === 0) {
             return res.status(403).json({
                 success: false,
-                message: "There are no active elections at the moment"
+                message: "There is no active election right now"
             });
         }
 
         const electionId = electionRows[0].election_id;
 
-        const tableName = role === 'candidate' ? 'candidates' : 'voters';
-        const idColumn = role === 'candidate' ? 'candidate_id' : 'voter_id';
+        // ✅ منع التصويت المكرر لنفس الانتخابات فقط
+        const { rows: existingVote } = await pool.query(
+            `SELECT 1 FROM votes
+             WHERE voter_id = $1
+             AND election_id = $2
+             LIMIT 1`,
+            [id, electionId]
+        );
 
-        const status = await Vote.checkIfVoted(tableName, idColumn, id);
-        if (status && status.has_voted) {
+        if (existingVote.length > 0) {
             return res.status(400).json({
                 success: false,
-                message: "You have already voted previously"
+                message: "You have already voted in this election"
             });
         }
 
-        await Vote.executeVote(
-            role,
-            id,
-            candidate_id,
-            tableName,
-            idColumn,
-            electionId
+        await pool.query(
+            `INSERT INTO votes (voter_id, voter_role, candidate_id, election_id)
+             VALUES ($1, $2, $3, $4)`,
+            [id, role, candidate_id, electionId]
         );
 
-        const voteCard = await Vote.getVoteCard(id, role);
-
-        res.status(200).json({
+        res.json({
             success: true,
-            message: "Your vote has been successfully recorded. Thank you for participating.",
-            vote_card: voteCard
+            message: "Vote recorded successfully"
         });
 
     } catch (err) {
-        console.error("Cast Vote Error:", err.message);
         res.status(500).json({
             success: false,
-            message: "An internal error occurred while recording your vote"
+            message: err.message
         });
     }
 };
@@ -133,29 +132,46 @@ exports.getResults = async (req, res) => {
     try {
 
         ////////////////////////////////////////////////////////////
-        // ✅ 1️⃣ Get latest approved election group
+        // ✅ 1️⃣ Get latest CLOSED election group only
         ////////////////////////////////////////////////////////////
         const { rows: groupRows } = await pool.query(
-            `SELECT eg.group_id
-             FROM election_groups eg
-             JOIN elections e 
-               ON e.election_group_id = eg.group_id
-             WHERE e.result_status = 'approved'
-             ORDER BY eg.created_at DESC
+            `SELECT group_id
+             FROM election_groups
+             WHERE is_closed = TRUE
+             ORDER BY created_at DESC
              LIMIT 1`
         );
 
         if (groupRows.length === 0) {
             return res.status(403).json({
                 success: false,
-                message: "Results are currently under review by the election committee"
+                message: "No finalized election results available"
             });
         }
 
         const groupId = groupRows[0].group_id;
 
         ////////////////////////////////////////////////////////////
-        // ✅ 2️⃣ Total votes for this election group
+        // ✅ 2️⃣ Check if this group has approved results
+        ////////////////////////////////////////////////////////////
+        const { rows: approvedCheck } = await pool.query(
+            `SELECT 1
+             FROM elections
+             WHERE election_group_id = $1
+             AND result_status = 'approved'
+             LIMIT 1`,
+            [groupId]
+        );
+
+        if (approvedCheck.length === 0) {
+            return res.status(403).json({
+                success: false,
+                message: "Results are still under review"
+            });
+        }
+
+        ////////////////////////////////////////////////////////////
+        // ✅ 3️⃣ Count votes for this group
         ////////////////////////////////////////////////////////////
         const { rows: totalVotesRows } = await pool.query(
             `SELECT COUNT(v.vote_id)::INT AS total_votes
@@ -169,85 +185,44 @@ exports.getResults = async (req, res) => {
         const totalVotes = totalVotesRows[0]?.total_votes || 0;
 
         ////////////////////////////////////////////////////////////
-        // ✅ 3️⃣ Total approved candidates
-        ////////////////////////////////////////////////////////////
-        const { rows: candidatesCountRows } = await pool.query(
-            `SELECT COUNT(*)::INT AS total_candidates
-             FROM candidates
-             WHERE is_approved = TRUE`
-        );
-
-        const totalCandidates = candidatesCountRows[0]?.total_candidates || 0;
-
-        ////////////////////////////////////////////////////////////
-        // ✅ 4️⃣ Final Results
+        // ✅ 4️⃣ Get results
         ////////////////////////////////////////////////////////////
         const { rows } = await pool.query(
             `SELECT 
                 c.candidate_id,
                 cr.full_name,
-                c.personal_photos_url,
-                c.candidate_type,
-                c.election_symbol_url,
-                cr.administrative_unit,
-                cr.governorate,
                 COUNT(v.vote_id)::INT AS total_votes,
                 CASE 
                     WHEN $2 = 0 THEN 0
                     ELSE ROUND((COUNT(v.vote_id) * 100.0) / $2, 2)
                 END AS percentage
-            FROM candidates c
-            LEFT JOIN civil_registry cr 
-              ON TRIM(c.national_id) = TRIM(cr.national_id)
-            LEFT JOIN votes v 
-              ON c.candidate_id = v.candidate_id
-              AND v.election_id IN (
-                    SELECT election_id
-                    FROM elections
-                    WHERE election_group_id = $1
-              )
-            WHERE c.is_approved = TRUE
-            GROUP BY 
-                c.candidate_id, 
-                cr.full_name, 
-                c.personal_photos_url,
-                c.candidate_type, 
-                c.election_symbol_url,
-                cr.administrative_unit, 
-                cr.governorate
-            ORDER BY total_votes DESC`,
+             FROM candidates c
+             LEFT JOIN civil_registry cr 
+               ON TRIM(c.national_id) = TRIM(cr.national_id)
+             LEFT JOIN votes v 
+               ON c.candidate_id = v.candidate_id
+             LEFT JOIN elections e
+               ON v.election_id = e.election_id
+             WHERE c.is_approved = TRUE
+               AND e.election_group_id = $1
+             GROUP BY c.candidate_id, cr.full_name
+             ORDER BY total_votes DESC`,
             [groupId, totalVotes]
         );
 
-        ////////////////////////////////////////////////////////////
-        // ✅ 5️⃣ Determine Winner
-        ////////////////////////////////////////////////////////////
-        const winner = rows.length > 0 ? rows[0] : null;
-
-        ////////////////////////////////////////////////////////////
-        // ✅ 6️⃣ Response
-        ////////////////////////////////////////////////////////////
         return res.json({
             success: true,
             group_id: groupId,
             summary: {
-                total_votes: totalVotes,
-                total_candidates: totalCandidates,
-                winner: winner ? {
-                    candidate_id: winner.candidate_id,
-                    full_name: winner.full_name,
-                    total_votes: winner.total_votes,
-                    percentage: winner.percentage
-                } : null
+                total_votes: totalVotes
             },
             data: rows
         });
 
     } catch (err) {
-        console.error("Results Error:", err.message);
         return res.status(500).json({
             success: false,
-            message: "Error retrieving election results"
+            message: err.message
         });
     }
 };

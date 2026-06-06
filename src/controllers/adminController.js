@@ -437,39 +437,27 @@ exports.deleteCandidate = async (req, res) => {
 
 exports.getDashboardStats = async (req, res) => {
     try {
-
-        ////////////////////////////////////////////////////////////
-        // ✅ 1️⃣ Get latest approved election group
-        ////////////////////////////////////////////////////////////
-        const { rows: groupRows } = await queryWithRetry(
-            `SELECT eg.group_id
-             FROM election_groups eg
-             JOIN elections e
-               ON e.election_group_id = eg.group_id
-             WHERE e.result_status = 'approved'
-             ORDER BY eg.created_at DESC
+        const { rows: groupRows } = await pool.query(
+            `SELECT group_id
+             FROM election_groups
+             WHERE is_closed = TRUE
+             ORDER BY created_at DESC
              LIMIT 1`
         );
 
         if (groupRows.length === 0) {
             return res.json({
                 success: true,
-                data: {
-                    voters: 0,
-                    candidates: 0
-                }
+                data: { voters: 0, candidates: 0 }
             });
         }
 
         const groupId = groupRows[0].group_id;
 
-        ////////////////////////////////////////////////////////////
-        // ✅ 2️⃣ Count voters for THIS group only
-        ////////////////////////////////////////////////////////////
-        const { rows } = await queryWithRetry(
+        const { rows } = await pool.query(
             `SELECT 
                 (
-                    SELECT COUNT(*) 
+                    SELECT COUNT(*)
                     FROM votes v
                     JOIN elections e
                       ON v.election_id = e.election_id
@@ -480,8 +468,7 @@ exports.getDashboardStats = async (req, res) => {
                     SELECT COUNT(*)
                     FROM candidates
                     WHERE is_approved = TRUE
-                )::INT AS total_candidates
-            `,
+                )::INT AS total_candidates`,
             [groupId]
         );
 
@@ -494,9 +481,9 @@ exports.getDashboardStats = async (req, res) => {
         });
 
     } catch (err) {
-        res.status(500).json({ 
-            success: false, 
-            message: err.message 
+        res.status(500).json({
+            success: false,
+            message: err.message
         });
     }
 };
