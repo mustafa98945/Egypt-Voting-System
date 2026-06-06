@@ -288,7 +288,6 @@ exports.listCandidates = async (req, res) => {
     try {
         const { governorate } = req.user;
 
-        // ✅ التحقق من وجود انتخابات active للمحافظة دي
         const { rows: electionRows } = await pool.query(
             `SELECT election_id
              FROM elections
@@ -308,8 +307,8 @@ exports.listCandidates = async (req, res) => {
             });
         }
 
-        // ✅ جيب المرشحين المقبولين من نفس المحافظة
-        // بدون شرط election_id لأنه مش موجود في candidates
+        const electionId = electionRows[0].election_id;
+
         const { rows } = await pool.query(
             `SELECT 
                 c.candidate_id,
@@ -322,9 +321,9 @@ exports.listCandidates = async (req, res) => {
              LEFT JOIN civil_registry cr
                ON TRIM(c.national_id) = TRIM(cr.national_id)
              WHERE c.is_approved = TRUE
-             AND TRIM(cr.governorate) = TRIM($1)
+             AND c.election_id = $1
              ORDER BY c.created_at DESC`,
-            [governorate]
+            [electionId]
         );
 
         res.json({

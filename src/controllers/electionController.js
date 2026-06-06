@@ -58,7 +58,8 @@ exports.createElection = async (req, res) => {
         ////////////////////////////////////////////////////////////
         await pool.query(
             `UPDATE elections
-             SET result_status = 'archived'
+             SET result_status = 'archived',
+                 is_active = FALSE
              WHERE result_status = 'approved'`
         );
 
@@ -68,27 +69,14 @@ exports.createElection = async (req, res) => {
         await pool.query(`DELETE FROM votes`);
 
         ////////////////////////////////////////////////////////////
-        // ✅ 3️⃣ هات أو أنشئ group جديد
+        // ✅ 3️⃣ أنشئ group جديد دائمًا
         ////////////////////////////////////////////////////////////
-        let { rows: groupRows } = await pool.query(
-            `SELECT group_id 
-             FROM election_groups 
-             WHERE is_closed = FALSE 
-             ORDER BY created_at DESC 
-             LIMIT 1`
+        const { rows: newGroup } = await pool.query(
+            `INSERT INTO election_groups DEFAULT VALUES
+             RETURNING group_id`
         );
 
-        let groupId;
-
-        if (groupRows.length === 0) {
-            const { rows: newGroup } = await pool.query(
-                `INSERT INTO election_groups DEFAULT VALUES
-                 RETURNING group_id`
-            );
-            groupId = newGroup[0].group_id;
-        } else {
-            groupId = groupRows[0].group_id;
-        }
+        const groupId = newGroup[0].group_id;
 
         ////////////////////////////////////////////////////////////
         // ✅ 4️⃣ إنشاء الانتخابات الجديدة
@@ -129,7 +117,10 @@ exports.createElection = async (req, res) => {
 
     } catch (err) {
         console.error("Create Election Error:", err);
-        res.status(500).json({ success: false, message: err.message });
+        res.status(500).json({
+            success: false,
+            message: err.message
+        });
     }
 };
 ////////////////////////////////////////////////////////////

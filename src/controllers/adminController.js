@@ -726,7 +726,7 @@ exports.decideElectionGroup = async (req, res) => {
         if (!decision || !['approved', 'refused'].includes(decision)) {
             return res.status(400).json({
                 success: false,
-                message: "Please provide a valid decision"
+                message: "Invalid decision"
             });
         }
 
@@ -764,10 +764,7 @@ exports.decideElectionGroup = async (req, res) => {
 
         res.json({
             success: true,
-            message:
-                decision === 'approved'
-                    ? "Election cycle approved ✅"
-                    : "Election cycle refused ❌"
+            message: "Election cycle updated ✅"
         });
 
     } catch (err) {
@@ -777,67 +774,7 @@ exports.decideElectionGroup = async (req, res) => {
             message: err.message
         });
     }
-};exports.getVotesData = async (req, res) => {
-    try {
-        const { rows } = await queryWithRetry(
-            `SELECT 
-                v.vote_id AS v_code,
-                v.created_at::TIME       AS time,
-                v.created_at::DATE       AS data,
-                COALESCE(
-                    cr_voter.national_id, 
-                    cr_candidate_voter.national_id
-                ) AS v_national_id,
-                COALESCE(
-                    cr_voter.full_name, 
-                    cr_candidate_voter.full_name
-                ) AS voter_name,
-                e.election_name          AS election_name,
-                cr_candidate.national_id AS c_national_id,
-                cr_candidate.full_name   AS candidate_name
-             FROM votes v
-             -- لو voter
-             LEFT JOIN voters vt 
-               ON v.voter_id = vt.voter_id 
-               AND v.voter_role = 'voter'
-             LEFT JOIN civil_registry cr_voter 
-               ON TRIM(vt.national_id) = TRIM(cr_voter.national_id)
-             -- لو candidate بيصوت
-             LEFT JOIN candidates cd_voter
-               ON v.voter_id = cd_voter.candidate_id 
-               AND v.voter_role = 'candidate'
-             LEFT JOIN civil_registry cr_candidate_voter 
-               ON TRIM(cd_voter.national_id) = TRIM(cr_candidate_voter.national_id)
-             -- بيانات المرشح المصوت له
-             LEFT JOIN candidates c 
-               ON v.candidate_id = c.candidate_id
-             LEFT JOIN civil_registry cr_candidate 
-               ON TRIM(c.national_id) = TRIM(cr_candidate.national_id)
-             -- بيانات الانتخابات
-             LEFT JOIN elections e 
-               ON e.election_id = (
-                   SELECT election_id FROM elections 
-                   ORDER BY created_at DESC LIMIT 1
-               )
-             WHERE cr_candidate.national_id IS NOT NULL
-             AND COALESCE(
-                 cr_voter.national_id, 
-                 cr_candidate_voter.national_id
-             ) IS NOT NULL
-             ORDER BY v.created_at DESC`
-        );
-
-        res.json({
-            success: true,
-            count: rows.length,
-            data: rows
-        });
-
-    } catch (err) {
-        res.status(500).json({ success: false, message: err.message });
-    }
 };
-
 exports.getVotersStatus = async (req, res) => {
     try {
 
