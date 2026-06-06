@@ -1,4 +1,3 @@
-const Vote = require('../models/voteModel');
 const { pool } = require('../config/db');
 
 ////////////////////////////////////////////////////////////
@@ -16,9 +15,6 @@ exports.castVote = async (req, res) => {
             });
         }
 
-        ////////////////////////////////////////////////////////////
-        // ✅ Get active election from OPEN group only
-        ////////////////////////////////////////////////////////////
         const { rows: electionRows } = await pool.query(
             `SELECT e.election_id
              FROM elections e
@@ -41,9 +37,6 @@ exports.castVote = async (req, res) => {
 
         const electionId = electionRows[0].election_id;
 
-        ////////////////////////////////////////////////////////////
-        // ✅ Insert vote مباشرة (الـ DB تمنع التكرار)
-        ////////////////////////////////////////////////////////////
         try {
             await pool.query(
                 `INSERT INTO votes (voter_id, voter_role, candidate_id, election_id)
@@ -57,7 +50,6 @@ exports.castVote = async (req, res) => {
             });
 
         } catch (err) {
-            // ✅ لو حاول يصوت تاني
             if (err.code === '23505') {
                 return res.status(400).json({
                     success: false,
@@ -68,7 +60,6 @@ exports.castVote = async (req, res) => {
         }
 
     } catch (err) {
-        console.error("Cast Vote Error:", err.message);
         res.status(500).json({
             success: false,
             message: err.message
@@ -116,7 +107,12 @@ exports.getVoteCard = async (req, res) => {
         const { id, role } = req.user;
 
         const { rows } = await pool.query(
-            `SELECT v.vote_id, v.created_at, c.candidate_id, cr.full_name
+            `SELECT v.vote_id,
+                    v.created_at,
+                    c.candidate_id,
+                    cr.full_name,
+                    c.personal_photos_url,
+                    c.candidate_type
              FROM votes v
              JOIN candidates c ON v.candidate_id = c.candidate_id
              JOIN civil_registry cr ON TRIM(c.national_id) = TRIM(cr.national_id)
@@ -156,7 +152,6 @@ exports.getResults = async (req, res) => {
         const { rows: groupRows } = await pool.query(
             `SELECT group_id
              FROM election_groups
-             WHERE is_closed = TRUE
              ORDER BY created_at DESC
              LIMIT 1`
         );
@@ -164,6 +159,7 @@ exports.getResults = async (req, res) => {
         if (groupRows.length === 0) {
             return res.json({
                 success: true,
+                election: null,
                 voters: 0,
                 summary: {
                     total_votes: 0,
@@ -174,6 +170,17 @@ exports.getResults = async (req, res) => {
         }
 
         const groupId = groupRows[0].group_id;
+
+        const { rows: electionRows } = await pool.query(
+            `SELECT *
+             FROM elections
+             WHERE election_group_id = $1
+             ORDER BY created_at DESC
+             LIMIT 1`,
+            [groupId]
+        );
+
+        const election = electionRows[0] || null;
 
         const { rows: totalVotesRows } = await pool.query(
             `SELECT COUNT(v.vote_id)::INT AS total_votes
@@ -190,6 +197,9 @@ exports.getResults = async (req, res) => {
             `SELECT 
                 c.candidate_id,
                 cr.full_name,
+                c.personal_photos_url,
+                c.candidate_type,
+                c.election_symbol_url,
                 COUNT(v.vote_id)::INT AS total_votes,
                 CASE 
                     WHEN $2 = 0 THEN 0
@@ -206,13 +216,19 @@ exports.getResults = async (req, res) => {
                    WHERE election_group_id = $1
                )
              WHERE c.is_approved = TRUE
-             GROUP BY c.candidate_id, cr.full_name
+             GROUP BY 
+                c.candidate_id,
+                cr.full_name,
+                c.personal_photos_url,
+                c.candidate_type,
+                c.election_symbol_url
              ORDER BY total_votes DESC`,
             [groupId, totalVotes]
         );
 
         res.json({
             success: true,
+            election: election,
             voters: totalVotes,
             summary: {
                 total_votes: totalVotes,
