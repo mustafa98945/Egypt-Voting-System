@@ -9,6 +9,9 @@ exports.castVote = async (req, res) => {
         const { id, role, governorate } = req.user;
         const { candidate_id } = req.body;
 
+        ////////////////////////////////////////////////////////////
+        // ✅ 1️⃣ Validate candidate selection
+        ////////////////////////////////////////////////////////////
         if (!candidate_id) {
             return res.status(400).json({
                 success: false,
@@ -17,7 +20,7 @@ exports.castVote = async (req, res) => {
         }
 
         ////////////////////////////////////////////////////////////
-        // ✅ Get active election in open group
+        // ✅ 2️⃣ Get active election from OPEN group only
         ////////////////////////////////////////////////////////////
         const { rows: electionRows } = await pool.query(
             `SELECT e.election_id
@@ -42,15 +45,18 @@ exports.castVote = async (req, res) => {
         const electionId = electionRows[0].election_id;
 
         ////////////////////////////////////////////////////////////
-        // ✅ Prevent duplicate vote (same person + same role + same election)
+        // ✅ 3️⃣ Prevent duplicate voting in CURRENT OPEN group only
         ////////////////////////////////////////////////////////////
         const { rows: existingVote } = await pool.query(
-            `SELECT 1 FROM votes
-             WHERE voter_id = $1
-             AND voter_role = $2
-             AND election_id = $3
+            `SELECT 1
+             FROM votes v
+             JOIN elections e ON v.election_id = e.election_id
+             JOIN election_groups eg ON e.election_group_id = eg.group_id
+             WHERE v.voter_id = $1
+             AND v.voter_role = $2
+             AND eg.is_closed = FALSE
              LIMIT 1`,
-            [id, role, electionId]
+            [id, role]
         );
 
         if (existingVote.length > 0) {
@@ -61,7 +67,7 @@ exports.castVote = async (req, res) => {
         }
 
         ////////////////////////////////////////////////////////////
-        // ✅ Insert vote
+        // ✅ 4️⃣ Insert vote
         ////////////////////////////////////////////////////////////
         await pool.query(
             `INSERT INTO votes (voter_id, voter_role, candidate_id, election_id)
@@ -69,12 +75,16 @@ exports.castVote = async (req, res) => {
             [id, role, candidate_id, electionId]
         );
 
+        ////////////////////////////////////////////////////////////
+        // ✅ 5️⃣ Success response
+        ////////////////////////////////////////////////////////////
         res.json({
             success: true,
             message: "Vote recorded successfully"
         });
 
     } catch (err) {
+        console.error("Cast Vote Error:", err.message);
         res.status(500).json({
             success: false,
             message: err.message
