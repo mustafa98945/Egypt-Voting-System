@@ -9,9 +9,6 @@ exports.castVote = async (req, res) => {
         const { id, role, governorate } = req.user;
         const { candidate_id } = req.body;
 
-        ////////////////////////////////////////////////////////////
-        // ✅ 1️⃣ Validate candidate selection
-        ////////////////////////////////////////////////////////////
         if (!candidate_id) {
             return res.status(400).json({
                 success: false,
@@ -20,7 +17,7 @@ exports.castVote = async (req, res) => {
         }
 
         ////////////////////////////////////////////////////////////
-        // ✅ 2️⃣ Get active election from OPEN group only
+        // ✅ Get active election from OPEN group only
         ////////////////////////////////////////////////////////////
         const { rows: electionRows } = await pool.query(
             `SELECT e.election_id
@@ -45,9 +42,48 @@ exports.castVote = async (req, res) => {
         const electionId = electionRows[0].election_id;
 
         ////////////////////////////////////////////////////////////
-        // ✅ 3️⃣ Prevent duplicate voting in CURRENT OPEN group only
+        // ✅ Insert vote مباشرة (الـ DB تمنع التكرار)
         ////////////////////////////////////////////////////////////
-        const { rows: existingVote } = await pool.query(
+        try {
+            await pool.query(
+                `INSERT INTO votes (voter_id, voter_role, candidate_id, election_id)
+                 VALUES ($1, $2, $3, $4)`,
+                [id, role, candidate_id, electionId]
+            );
+
+            return res.json({
+                success: true,
+                message: "Vote recorded successfully"
+            });
+
+        } catch (err) {
+            // ✅ لو حاول يصوت تاني
+            if (err.code === '23505') {
+                return res.status(400).json({
+                    success: false,
+                    message: "You have already voted in this election"
+                });
+            }
+            throw err;
+        }
+
+    } catch (err) {
+        console.error("Cast Vote Error:", err.message);
+        res.status(500).json({
+            success: false,
+            message: err.message
+        });
+    }
+};
+
+////////////////////////////////////////////////////////////
+// --- 2. Check Voting Status ---
+////////////////////////////////////////////////////////////
+exports.checkUserVotingStatus = async (req, res) => {
+    try {
+        const { id, role } = req.user;
+
+        const { rows } = await pool.query(
             `SELECT 1
              FROM votes v
              JOIN elections e ON v.election_id = e.election_id
@@ -59,59 +95,15 @@ exports.castVote = async (req, res) => {
             [id, role]
         );
 
-        if (existingVote.length > 0) {
-            return res.status(400).json({
-                success: false,
-                message: "You have already voted in this election"
-            });
-        }
-
-        ////////////////////////////////////////////////////////////
-        // ✅ 4️⃣ Insert vote
-        ////////////////////////////////////////////////////////////
-        await pool.query(
-            `INSERT INTO votes (voter_id, voter_role, candidate_id, election_id)
-             VALUES ($1, $2, $3, $4)`,
-            [id, role, candidate_id, electionId]
-        );
-
-        ////////////////////////////////////////////////////////////
-        // ✅ 5️⃣ Success response
-        ////////////////////////////////////////////////////////////
         res.json({
             success: true,
-            message: "Vote recorded successfully"
+            hasVoted: rows.length > 0
         });
 
     } catch (err) {
-        console.error("Cast Vote Error:", err.message);
         res.status(500).json({
             success: false,
             message: err.message
-        });
-    }
-};
-////////////////////////////////////////////////////////////
-// --- 2. Check Voting Status ---
-////////////////////////////////////////////////////////////
-exports.checkUserVotingStatus = async (req, res) => {
-    try {
-        const { id, role } = req.user;
-        const tableName = role === 'candidate' ? 'candidates' : 'voters';
-        const idColumn = role === 'candidate' ? 'candidate_id' : 'voter_id';
-
-        const status = await Vote.checkIfVoted(tableName, idColumn, id);
-
-        res.status(200).json({
-            success: true,
-            hasVoted: status ? status.has_voted : false
-        });
-
-    } catch (err) {
-        console.error("Check Status Error:", err.message);
-        res.status(500).json({ 
-            success: false, 
-            message: "Error retrieving voting status" 
         });
     }
 };
@@ -122,22 +114,35 @@ exports.checkUserVotingStatus = async (req, res) => {
 exports.getVoteCard = async (req, res) => {
     try {
         const { id, role } = req.user;
-        const voteCard = await Vote.getVoteCard(id, role);
 
-        if (!voteCard) {
+        const { rows } = await pool.query(
+            `SELECT v.vote_id, v.created_at, c.candidate_id, cr.full_name
+             FROM votes v
+             JOIN candidates c ON v.candidate_id = c.candidate_id
+             JOIN civil_registry cr ON TRIM(c.national_id) = TRIM(cr.national_id)
+             WHERE v.voter_id = $1
+             AND v.voter_role = $2
+             ORDER BY v.created_at DESC
+             LIMIT 1`,
+            [id, role]
+        );
+
+        if (rows.length === 0) {
             return res.status(404).json({
                 success: false,
                 message: "No vote has been recorded yet"
             });
         }
 
-        res.json({ success: true, vote_card: voteCard });
+        res.json({
+            success: true,
+            vote_card: rows[0]
+        });
 
     } catch (err) {
-        console.error("Vote Card Error:", err.message);
-        res.status(500).json({ 
-            success: false, 
-            message: "Error retrieving vote card data" 
+        res.status(500).json({
+            success: false,
+            message: err.message
         });
     }
 };
@@ -148,9 +153,6 @@ exports.getVoteCard = async (req, res) => {
 exports.getResults = async (req, res) => {
     try {
 
-        ////////////////////////////////////////////////////////////
-        // ✅ 1️⃣ Get latest CLOSED election group only
-        ////////////////////////////////////////////////////////////
         const { rows: groupRows } = await pool.query(
             `SELECT group_id
              FROM election_groups
@@ -160,40 +162,23 @@ exports.getResults = async (req, res) => {
         );
 
         if (groupRows.length === 0) {
-            return res.status(403).json({
-                success: false,
-                message: "No finalized election results available"
+            return res.json({
+                success: true,
+                voters: 0,
+                summary: {
+                    total_votes: 0,
+                    total_candidates: 0
+                },
+                data: []
             });
         }
 
         const groupId = groupRows[0].group_id;
 
-        ////////////////////////////////////////////////////////////
-        // ✅ 2️⃣ Check if this group has approved results
-        ////////////////////////////////////////////////////////////
-        const { rows: approvedCheck } = await pool.query(
-            `SELECT 1
-             FROM elections
-             WHERE election_group_id = $1
-             AND result_status = 'approved'
-             LIMIT 1`,
-            [groupId]
-        );
-
-        if (approvedCheck.length === 0) {
-            return res.status(403).json({
-                success: false,
-                message: "Results are still under review"
-            });
-        }
-
-        ////////////////////////////////////////////////////////////
-        // ✅ 3️⃣ Count votes for this group
-        ////////////////////////////////////////////////////////////
         const { rows: totalVotesRows } = await pool.query(
             `SELECT COUNT(v.vote_id)::INT AS total_votes
              FROM votes v
-             JOIN elections e 
+             JOIN elections e
                ON v.election_id = e.election_id
              WHERE e.election_group_id = $1`,
             [groupId]
@@ -201,9 +186,6 @@ exports.getResults = async (req, res) => {
 
         const totalVotes = totalVotesRows[0]?.total_votes || 0;
 
-        ////////////////////////////////////////////////////////////
-        // ✅ 4️⃣ Get results
-        ////////////////////////////////////////////////////////////
         const { rows } = await pool.query(
             `SELECT 
                 c.candidate_id,
@@ -218,26 +200,29 @@ exports.getResults = async (req, res) => {
                ON TRIM(c.national_id) = TRIM(cr.national_id)
              LEFT JOIN votes v 
                ON c.candidate_id = v.candidate_id
-             LEFT JOIN elections e
-               ON v.election_id = e.election_id
+               AND v.election_id IN (
+                   SELECT election_id
+                   FROM elections
+                   WHERE election_group_id = $1
+               )
              WHERE c.is_approved = TRUE
-               AND e.election_group_id = $1
              GROUP BY c.candidate_id, cr.full_name
              ORDER BY total_votes DESC`,
             [groupId, totalVotes]
         );
 
-        return res.json({
+        res.json({
             success: true,
-            group_id: groupId,
+            voters: totalVotes,
             summary: {
-                total_votes: totalVotes
+                total_votes: totalVotes,
+                total_candidates: rows.length
             },
             data: rows
         });
 
     } catch (err) {
-        return res.status(500).json({
+        res.status(500).json({
             success: false,
             message: err.message
         });
