@@ -608,26 +608,29 @@ exports.deleteParty = async (req, res) => {
 // --- 1. نتايج الانتخابات للـ Admin ---
 exports.getElectionResults = async (req, res) => {
     try {
+
         ////////////////////////////////////////////////////////////
-        // ✅ 1️⃣ Get latest election
+        // ✅ 1️⃣ Get latest approved election
         ////////////////////////////////////////////////////////////
         const { rows: electionRows } = await queryWithRetry(
-            `SELECT * FROM elections 
-             ORDER BY created_at DESC 
+            `SELECT *
+             FROM elections
+             WHERE result_status = 'approved'
+             ORDER BY created_at DESC
              LIMIT 1`
         );
 
         if (electionRows.length === 0) {
             return res.status(404).json({
                 success: false,
-                message: "No elections found"
+                message: "No approved elections found"
             });
         }
 
         const election = electionRows[0];
 
         ////////////////////////////////////////////////////////////
-        // ✅ 2️⃣ Count total voters (people who actually voted)
+        // ✅ 2️⃣ Count total voters for THIS election only
         ////////////////////////////////////////////////////////////
         const { rows: votersRows } = await queryWithRetry(
             `SELECT COUNT(*)::INT AS total_voters
@@ -639,7 +642,7 @@ exports.getElectionResults = async (req, res) => {
         const totalVoters = votersRows[0]?.total_voters || 0;
 
         ////////////////////////////////////////////////////////////
-        // ✅ 3️⃣ Get results ordered by highest votes
+        // ✅ 3️⃣ Get results ordered by votes
         ////////////////////////////////////////////////////////////
         const { rows } = await queryWithRetry(
             `SELECT 
@@ -669,7 +672,7 @@ exports.getElectionResults = async (req, res) => {
         ////////////////////////////////////////////////////////////
         res.json({
             success: true,
-            voters: totalVoters, // ✅ عدد الناس اللي صوتت فعليًا
+            voters: totalVoters,
             election: {
                 id: election.election_id,
                 name: election.election_name,
