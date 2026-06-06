@@ -608,7 +608,9 @@ exports.deleteParty = async (req, res) => {
 // --- 1. نتايج الانتخابات للـ Admin ---
 exports.getElectionResults = async (req, res) => {
     try {
-        // جلب آخر انتخابات
+        ////////////////////////////////////////////////////////////
+        // ✅ 1️⃣ Get latest election
+        ////////////////////////////////////////////////////////////
         const { rows: electionRows } = await queryWithRetry(
             `SELECT * FROM elections 
              ORDER BY created_at DESC 
@@ -624,7 +626,21 @@ exports.getElectionResults = async (req, res) => {
 
         const election = electionRows[0];
 
-        // جلب النتايج مرتبة من الأعلى تصويتاً
+        ////////////////////////////////////////////////////////////
+        // ✅ 2️⃣ Count total voters (people who actually voted)
+        ////////////////////////////////////////////////////////////
+        const { rows: votersRows } = await queryWithRetry(
+            `SELECT COUNT(DISTINCT voter_id)::INT AS total_voters
+             FROM votes
+             WHERE election_id = $1`,
+            [election.election_id]
+        );
+
+        const totalVoters = votersRows[0]?.total_voters || 0;
+
+        ////////////////////////////////////////////////////////////
+        // ✅ 3️⃣ Get results ordered by highest votes
+        ////////////////////////////////////////////////////////////
         const { rows } = await queryWithRetry(
             `SELECT 
                 c.candidate_id,
@@ -637,15 +653,23 @@ exports.getElectionResults = async (req, res) => {
                ON TRIM(c.national_id) = TRIM(cr.national_id)
              LEFT JOIN votes v 
                ON c.candidate_id = v.candidate_id
+               AND v.election_id = $1
              WHERE c.is_approved = TRUE
              GROUP BY 
-                c.candidate_id, cr.full_name, 
-                c.personal_photos_url, c.candidate_type
-             ORDER BY total_votes DESC`
+                c.candidate_id, 
+                cr.full_name, 
+                c.personal_photos_url, 
+                c.candidate_type
+             ORDER BY total_votes DESC`,
+            [election.election_id]
         );
 
+        ////////////////////////////////////////////////////////////
+        // ✅ 4️⃣ Response
+        ////////////////////////////////////////////////////////////
         res.json({
             success: true,
+            voters: totalVoters, // ✅ عدد الناس اللي صوتت
             election: {
                 id: election.election_id,
                 name: election.election_name,
@@ -657,7 +681,10 @@ exports.getElectionResults = async (req, res) => {
         });
 
     } catch (err) {
-        res.status(500).json({ success: false, message: err.message });
+        res.status(500).json({ 
+            success: false, 
+            message: err.message 
+        });
     }
 };
 
