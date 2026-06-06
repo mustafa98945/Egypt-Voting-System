@@ -644,76 +644,66 @@ exports.getElectionResults = async (req, res) => {
     try {
 
         ////////////////////////////////////////////////////////////
-        // ✅ 1️⃣ Get latest approved election
+        // ✅ Get latest CLOSED election group
         ////////////////////////////////////////////////////////////
-        const { rows: electionRows } = await queryWithRetry(
-            `SELECT *
-             FROM elections
-             WHERE result_status = 'approved'
+        const { rows: groupRows } = await queryWithRetry(
+            `SELECT group_id
+             FROM election_groups
+             WHERE is_closed = TRUE
              ORDER BY created_at DESC
              LIMIT 1`
         );
 
-        if (electionRows.length === 0) {
+        if (groupRows.length === 0) {
             return res.status(404).json({
                 success: false,
-                message: "No approved elections found"
+                message: "No closed election group found"
             });
         }
 
-        const election = electionRows[0];
+        const groupId = groupRows[0].group_id;
 
         ////////////////////////////////////////////////////////////
-        // ✅ 2️⃣ Count total voters for THIS election only
+        // ✅ Count voters for this group only
         ////////////////////////////////////////////////////////////
         const { rows: votersRows } = await queryWithRetry(
             `SELECT COUNT(*)::INT AS total_voters
-             FROM votes
-             WHERE election_id = $1`,
-            [election.election_id]
+             FROM votes v
+             JOIN elections e
+               ON v.election_id = e.election_id
+             WHERE e.election_group_id = $1`,
+            [groupId]
         );
 
         const totalVoters = votersRows[0]?.total_voters || 0;
 
         ////////////////////////////////////////////////////////////
-        // ✅ 3️⃣ Get results ordered by votes
+        // ✅ Get results
         ////////////////////////////////////////////////////////////
         const { rows } = await queryWithRetry(
             `SELECT 
                 c.candidate_id,
                 cr.full_name,
-                c.personal_photos_url,
-                c.candidate_type,
                 COUNT(v.vote_id)::INT AS total_votes
              FROM candidates c
              LEFT JOIN civil_registry cr 
                ON TRIM(c.national_id) = TRIM(cr.national_id)
              LEFT JOIN votes v 
                ON c.candidate_id = v.candidate_id
-               AND v.election_id = $1
+             LEFT JOIN elections e
+               ON v.election_id = e.election_id
              WHERE c.is_approved = TRUE
+               AND e.election_group_id = $1
              GROUP BY 
-                c.candidate_id, 
-                cr.full_name, 
-                c.personal_photos_url, 
-                c.candidate_type
+                c.candidate_id,
+                cr.full_name
              ORDER BY total_votes DESC`,
-            [election.election_id]
+            [groupId]
         );
 
-        ////////////////////////////////////////////////////////////
-        // ✅ 4️⃣ Response
-        ////////////////////////////////////////////////////////////
         res.json({
             success: true,
             voters: totalVoters,
-            election: {
-                id: election.election_id,
-                name: election.election_name,
-                start_date: election.start_date,
-                end_date: election.end_date,
-                result_status: election.result_status
-            },
             data: rows
         });
 
