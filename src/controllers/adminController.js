@@ -648,6 +648,7 @@ exports.getElectionResults = async (req, res) => {
         if (groupRows.length === 0) {
             return res.json({
                 success: true,
+                election: null,
                 voters: 0,
                 summary: {
                     total_votes: 0,
@@ -658,6 +659,24 @@ exports.getElectionResults = async (req, res) => {
         }
 
         const groupId = groupRows[0].group_id;
+
+        ////////////////////////////////////////////////////////////
+        // ✅ Get election info
+        ////////////////////////////////////////////////////////////
+        const { rows: electionRows } = await pool.query(
+            `SELECT e.election_id,
+                    e.election_name,
+                    e.start_date,
+                    e.end_date,
+                    e.result_status
+             FROM elections e
+             WHERE e.election_group_id = $1
+             ORDER BY e.created_at DESC
+             LIMIT 1`,
+            [groupId]
+        );
+
+        const election = electionRows[0] || null;
 
         ////////////////////////////////////////////////////////////
         // ✅ Count total votes
@@ -674,18 +693,18 @@ exports.getElectionResults = async (req, res) => {
         const totalVotes = voteRows[0]?.total_votes || 0;
 
         ////////////////////////////////////////////////////////////
-        // ✅ Get ALL approved candidates (even if 0 votes)
+        // ✅ Get ALL approved candidates (حتى لو صفر)
         ////////////////////////////////////////////////////////////
         const { rows } = await pool.query(
             `SELECT 
                 c.candidate_id,
                 cr.full_name,
+                c.personal_photos_url,
+                c.candidate_type,
                 COUNT(v.vote_id)::INT AS total_votes
              FROM candidates c
              LEFT JOIN civil_registry cr
                ON TRIM(c.national_id) = TRIM(cr.national_id)
-
-             -- ✅ الربط الصحيح هنا
              LEFT JOIN votes v
                ON c.candidate_id = v.candidate_id
                AND v.election_id IN (
@@ -693,15 +712,22 @@ exports.getElectionResults = async (req, res) => {
                    FROM elections
                    WHERE election_group_id = $1
                )
-
              WHERE c.is_approved = TRUE
-             GROUP BY c.candidate_id, cr.full_name
+             GROUP BY 
+                c.candidate_id,
+                cr.full_name,
+                c.personal_photos_url,
+                c.candidate_type
              ORDER BY total_votes DESC`,
             [groupId]
         );
 
+        ////////////////////////////////////////////////////////////
+        // ✅ Final Response (متوافق مع الفرونت)
+        ////////////////////////////////////////////////////////////
         res.json({
             success: true,
+            election: election,               // ✅ الفرونت مستنيها
             voters: totalVotes,
             summary: {
                 total_votes: totalVotes,
@@ -711,6 +737,7 @@ exports.getElectionResults = async (req, res) => {
         });
 
     } catch (err) {
+        console.error("Get Election Results Error:", err.message);
         res.status(500).json({
             success: false,
             message: err.message
