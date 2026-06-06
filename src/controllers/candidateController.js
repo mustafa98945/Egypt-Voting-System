@@ -288,11 +288,13 @@ exports.listCandidates = async (req, res) => {
     try {
         const { governorate } = req.user;
 
+        ////////////////////////////////////////////////////////////
+        // ✅ هات الانتخابات pending فقط
+        ////////////////////////////////////////////////////////////
         const { rows: electionRows } = await pool.query(
             `SELECT election_id
              FROM elections
              WHERE result_status = 'pending'
-             AND is_active = TRUE
              AND TRIM(governorate) = TRIM($1)
              ORDER BY created_at DESC
              LIMIT 1`,
@@ -309,6 +311,9 @@ exports.listCandidates = async (req, res) => {
 
         const electionId = electionRows[0].election_id;
 
+        ////////////////////////////////////////////////////////////
+        // ✅ هات المرشحين approved لنفس المحافظة
+        ////////////////////////////////////////////////////////////
         const { rows } = await pool.query(
             `SELECT 
                 c.candidate_id,
@@ -321,12 +326,12 @@ exports.listCandidates = async (req, res) => {
              LEFT JOIN civil_registry cr
                ON TRIM(c.national_id) = TRIM(cr.national_id)
              WHERE c.is_approved = TRUE
-             AND c.election_id = $1
+             AND TRIM(cr.governorate) = TRIM($1)
              ORDER BY c.created_at DESC`,
-            [electionId]
+            [governorate]
         );
 
-        res.json({
+        return res.json({
             success: true,
             count: rows.length,
             data: rows
