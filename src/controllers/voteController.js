@@ -19,6 +19,7 @@ exports.castVote = async (req, res) => {
 
         await client.query('BEGIN');
 
+        // ✅ جلب الانتخابات النشطة لنفس المحافظة
         const { rows: electionRows } = await client.query(
             `SELECT e.election_id
              FROM elections e
@@ -41,6 +42,7 @@ exports.castVote = async (req, res) => {
 
         const electionId = electionRows[0].election_id;
 
+        // 🔴 IMPORTANT: Double-check داخل Transaction لمنع Race Condition
         const { rows: existingVote } = await client.query(
             `SELECT vote_id
              FROM votes
@@ -48,7 +50,7 @@ exports.castVote = async (req, res) => {
              AND voter_role = $2
              AND election_id = $3
              LIMIT 1
-             FOR UPDATE`,
+             FOR UPDATE`,  // 🔒 قفل السجل!
             [id, role, electionId]
         );
 
@@ -60,6 +62,7 @@ exports.castVote = async (req, res) => {
             });
         }
 
+        // ✅ تسجيل التصويت
         const { rows: voteRows } = await client.query(
             `INSERT INTO votes (voter_id, voter_role, candidate_id, election_id, created_at)
              VALUES ($1, $2, $3, $4, NOW())
@@ -81,6 +84,7 @@ exports.castVote = async (req, res) => {
     } catch (err) {
         await client.query('ROLLBACK');
         console.error("CastVote Error:", err);
+
         return res.status(500).json({
             success: false,
             message: "Internal server error",
@@ -92,12 +96,13 @@ exports.castVote = async (req, res) => {
 };
 
 ////////////////////////////////////////////////////////////
-// --- 2. Check Voting Status ---
+// --- 2. Check Voting Status (المهم جداً!)
 ////////////////////////////////////////////////////////////
 exports.checkUserVotingStatus = async (req, res) => {
     try {
         const { id, role, governorate } = req.user;
 
+        // ✅ جلب الانتخابات النشطة لنفس المحافظة
         const { rows: electionRows } = await pool.query(
             `SELECT e.election_id
              FROM elections e
@@ -110,16 +115,19 @@ exports.checkUserVotingStatus = async (req, res) => {
             [governorate]
         );
 
+        // لو ما فيش انتخابات نشطة
         if (electionRows.length === 0) {
             return res.json({
                 success: true,
                 hasVoted: false,
-                voteId: null
+                voteId: null,
+                message: "No active election"
             });
         }
 
         const electionId = electionRows[0].election_id;
 
+        // ✅ البحث بـ election_id بالظبط (مش عام!)
         const { rows } = await pool.query(
             `SELECT vote_id
              FROM votes
@@ -141,7 +149,8 @@ exports.checkUserVotingStatus = async (req, res) => {
         console.error("CheckStatus Error:", err);
         return res.status(500).json({
             success: false,
-            message: "Failed to check voting status"
+            message: "Failed to check voting status",
+            error: err.message
         });
     }
 };
@@ -153,25 +162,16 @@ exports.getVoteCard = async (req, res) => {
     try {
         const { id, role } = req.user;
 
-        // ✅ بنجيب أحدث صوت للمستخدم
         const { rows } = await pool.query(
-            `SELECT 
-                v.vote_id,
-                v.created_at,
-                v.election_id,
-                c.candidate_id,
-                cr.full_name,
-                c.personal_photos_url,
-                c.candidate_type,
-                e.governorate,
-                e.election_name
+            `SELECT v.vote_id,
+                    v.created_at,
+                    c.candidate_id,
+                    cr.full_name,
+                    c.personal_photos_url,
+                    c.candidate_type
              FROM votes v
-             JOIN candidates c 
-               ON v.candidate_id = c.candidate_id
-             JOIN civil_registry cr 
-               ON TRIM(c.national_id) = TRIM(cr.national_id)
-             JOIN elections e 
-               ON v.election_id = e.election_id
+             JOIN candidates c ON v.candidate_id = c.candidate_id
+             JOIN civil_registry cr ON TRIM(c.national_id) = TRIM(cr.national_id)
              WHERE v.voter_id = $1
              AND v.voter_role = $2
              ORDER BY v.created_at DESC
@@ -195,7 +195,8 @@ exports.getVoteCard = async (req, res) => {
         console.error("GetVoteCard Error:", err);
         return res.status(500).json({
             success: false,
-            message: "Failed to get vote card"
+            message: "Failed to get vote card",
+            error: err.message
         });
     }
 };
@@ -205,10 +206,7 @@ exports.getVoteCard = async (req, res) => {
 ////////////////////////////////////////////////////////////
 exports.getResults = async (req, res) => {
     try {
-
-        ////////////////////////////////////////////////////////////
-        // ✅ 1️⃣ هات آخر جروب فيه انتخابات approved فقط
-        ////////////////////////////////////////////////////////////
+        // ✅ هات آخر جروب فيه انتخابات approved
         const { rows: groupRows } = await pool.query(
             `SELECT election_group_id
              FROM elections
@@ -217,47 +215,24 @@ exports.getResults = async (req, res) => {
              LIMIT 1`
         );
 
-        // ✅ لو مفيش approved → مش هنرجع نتائج
         if (groupRows.length === 0) {
             return res.json({
                 success: true,
-                summary: {
-                    total_votes: 0,
-                    total_candidates: 0
-                },
+                summary: { total_votes: 0, total_candidates: 0 },
                 data: []
             });
         }
 
         const groupId = groupRows[0].election_group_id;
 
-        ////////////////////////////////////////////////////////////
-        // ✅ 2️⃣ كل election_ids داخل الجروب ده
-        ////////////////////////////////////////////////////////////
-        const { rows: electionIds } = await pool.query(
-            `SELECT election_id
-             FROM elections
-             WHERE election_group_id = $1`,
-            [groupId]
-        );
-
-        const ids = electionIds.map(e => e.election_id);
-
-        ////////////////////////////////////////////////////////////
-        // ✅ 3️⃣ إجمالي الأصوات داخل الجروب بس
-        ////////////////////////////////////////////////////////////
+        // ✅ إجمالي الأصوات بدون election_id
         const { rows: totalVotesRows } = await pool.query(
-            `SELECT COUNT(*)::INT AS total_votes
-             FROM votes
-             WHERE election_id = ANY($1::int[])`,
-            [ids]
+            `SELECT COUNT(*)::INT AS total_votes FROM votes`
         );
 
         const totalVotes = totalVotesRows[0]?.total_votes || 0;
 
-        ////////////////////////////////////////////////////////////
-        // ✅ 4️⃣ جلب المرشحين وأصواتهم داخل الجروب بس
-        ////////////////////////////////////////////////////////////
+        // ✅ جلب المرشحين وأصواتهم بدون election_id
         const { rows } = await pool.query(
             `SELECT 
                 c.candidate_id,
@@ -268,28 +243,24 @@ exports.getResults = async (req, res) => {
                 c.election_symbol_url,
                 COUNT(v.vote_id)::INT AS total_votes,
                 CASE 
-                    WHEN $2 = 0 THEN 0
-                    ELSE ROUND((COUNT(v.vote_id) * 100.0) / $2, 2)
+                    WHEN $1 = 0 THEN 0
+                    ELSE ROUND((COUNT(v.vote_id) * 100.0) / $1, 2)
                 END AS percentage
              FROM candidates c
-             LEFT JOIN civil_registry cr 
+             LEFT JOIN civil_registry cr
                ON TRIM(c.national_id) = TRIM(cr.national_id)
-             LEFT JOIN votes v 
+             LEFT JOIN votes v
                ON c.candidate_id = v.candidate_id
-               AND v.election_id = ANY($1::int[])
              WHERE c.is_approved = TRUE
              GROUP BY 
-                c.candidate_id,
-                cr.full_name,
-                cr.governorate,
-                c.personal_photos_url,
-                c.candidate_type,
+                c.candidate_id, cr.full_name, cr.governorate,
+                c.personal_photos_url, c.candidate_type,
                 c.election_symbol_url
              ORDER BY total_votes DESC`,
-            [ids, totalVotes]
+            [totalVotes]
         );
 
-        return res.json({
+        res.json({
             success: true,
             group_id: groupId,
             summary: {
@@ -301,7 +272,7 @@ exports.getResults = async (req, res) => {
 
     } catch (err) {
         console.error("GetResults Error:", err);
-        return res.status(500).json({
+        res.status(500).json({
             success: false,
             message: err.message
         });
