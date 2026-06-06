@@ -47,6 +47,11 @@ exports.createElection = async (req, res) => {
             });
         }
 
+        ////////////////////////////////////////////////////////////
+        // ✅ مهم: حذف الأصوات القديمة عند إنشاء انتخابات جديدة
+        ////////////////////////////////////////////////////////////
+        await pool.query(`DELETE FROM votes`);
+
         const start = new Date(start_date);
         start.setHours(0, 0, 0, 0);
 
@@ -82,8 +87,8 @@ exports.createElection = async (req, res) => {
         const { rows } = await pool.query(
             `INSERT INTO elections 
              (election_type, election_name, governorate, logo_url, 
-              start_date, end_date, is_active, election_group_id)
-             VALUES ($1, $2, $3, $4, $5, $6, TRUE, $7)
+              start_date, end_date, is_active, election_group_id, result_status)
+             VALUES ($1, $2, $3, $4, $5, $6, TRUE, $7, 'pending')
              RETURNING *`,
             [
                 election_type,
@@ -98,7 +103,7 @@ exports.createElection = async (req, res) => {
 
         res.status(201).json({
             success: true,
-            message: "Election created successfully",
+            message: "Election created successfully ✅",
             data: rows[0]
         });
 
@@ -107,7 +112,6 @@ exports.createElection = async (req, res) => {
         res.status(500).json({ success: false, message: err.message });
     }
 };
-
 ////////////////////////////////////////////////////////////
 // ✅ 2. Edit Election
 ////////////////////////////////////////////////////////////

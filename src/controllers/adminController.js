@@ -726,11 +726,10 @@ exports.decideElectionGroup = async (req, res) => {
         if (!decision || !['approved', 'refused'].includes(decision)) {
             return res.status(400).json({
                 success: false,
-                message: "Please provide a valid decision: approved or refused"
+                message: "Please provide a valid decision"
             });
         }
 
-        // ✅ هات آخر group مفتوح
         const { rows: groupRows } = await pool.query(
             `SELECT group_id
              FROM election_groups
@@ -748,15 +747,14 @@ exports.decideElectionGroup = async (req, res) => {
 
         const groupId = groupRows[0].group_id;
 
-        // ✅ حدّث كل الانتخابات داخل الجروب
         await pool.query(
             `UPDATE elections
-             SET result_status = $1
+             SET result_status = $1,
+                 is_active = FALSE
              WHERE election_group_id = $2`,
             [decision, groupId]
         );
 
-        // ✅ اقفل الجروب
         await pool.query(
             `UPDATE election_groups
              SET is_closed = TRUE
@@ -768,19 +766,18 @@ exports.decideElectionGroup = async (req, res) => {
             success: true,
             message:
                 decision === 'approved'
-                    ? "Election cycle approved successfully ✅"
-                    : "Election cycle refused ❌ A new cycle can now be started"
+                    ? "Election cycle approved ✅"
+                    : "Election cycle refused ❌"
         });
 
     } catch (err) {
-        console.error("Decision Error:", err.message);
+        console.error("Decision Error:", err);
         res.status(500).json({
             success: false,
-            message: "An error occurred while updating the election cycle status"
+            message: err.message
         });
     }
-};
-exports.getVotesData = async (req, res) => {
+};exports.getVotesData = async (req, res) => {
     try {
         const { rows } = await queryWithRetry(
             `SELECT 

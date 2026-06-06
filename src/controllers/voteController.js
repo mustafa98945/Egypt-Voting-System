@@ -206,19 +206,13 @@ exports.getVoteCard = async (req, res) => {
 ////////////////////////////////////////////////////////////
 exports.getResults = async (req, res) => {
     try {
-        const { governorate } = req.user;
 
-        ////////////////////////////////////////////////////////////
-        // ✅ 1️⃣ هات آخر انتخابات معمولها approval للمحافظة
-        ////////////////////////////////////////////////////////////
         const { rows: electionRows } = await pool.query(
-            `SELECT e.election_id
-             FROM elections e
-             WHERE TRIM(e.governorate) = TRIM($1)
-             AND e.result_status = 'approved'   -- ✅ الأساس هنا
-             ORDER BY e.created_at DESC
-             LIMIT 1`,
-            [governorate]
+            `SELECT election_id
+             FROM elections
+             WHERE result_status = 'approved'
+             ORDER BY created_at DESC
+             LIMIT 1`
         );
 
         if (electionRows.length === 0) {
@@ -235,9 +229,6 @@ exports.getResults = async (req, res) => {
 
         const electionId = electionRows[0].election_id;
 
-        ////////////////////////////////////////////////////////////
-        // ✅ 2️⃣ إجمالي الأصوات
-        ////////////////////////////////////////////////////////////
         const { rows: totalVotesRows } = await pool.query(
             `SELECT COUNT(*)::INT AS total_votes
              FROM votes
@@ -247,13 +238,11 @@ exports.getResults = async (req, res) => {
 
         const totalVotes = totalVotesRows[0]?.total_votes || 0;
 
-        ////////////////////////////////////////////////////////////
-        // ✅ 3️⃣ جلب المرشحين لنفس election فقط
-        ////////////////////////////////////////////////////////////
         const { rows } = await pool.query(
             `SELECT 
                 c.candidate_id,
                 cr.full_name,
+                cr.governorate,
                 c.personal_photos_url,
                 c.candidate_type,
                 c.election_symbol_url,
@@ -273,6 +262,7 @@ exports.getResults = async (req, res) => {
              GROUP BY 
                 c.candidate_id,
                 cr.full_name,
+                cr.governorate,
                 c.personal_photos_url,
                 c.candidate_type,
                 c.election_symbol_url
