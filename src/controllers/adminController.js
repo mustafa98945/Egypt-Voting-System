@@ -802,7 +802,7 @@ exports.getVotersStatus = async (req, res) => {
         const electionId = electionRows[0].election_id;
 
         ////////////////////////////////////////////////////////////
-        // ✅ جلب كل المواطنين فوق 18 سنة من السجل المدني
+        // ✅ جلب كل المواطنين فوق 18 سنة
         ////////////////////////////////////////////////////////////
         const { rows } = await pool.query(
             `
@@ -821,22 +821,20 @@ exports.getVotersStatus = async (req, res) => {
 
             FROM civil_registry cr
 
-            -- ✅ شرط السن
-            WHERE DATE_PART('year', AGE(CURRENT_DATE, cr.birth_date)) >= 18
+            LEFT JOIN voters vt
+                ON TRIM(vt.national_id) = TRIM(cr.national_id)
 
-            -- ✅ ربط الأصوات
             LEFT JOIN votes v
-                ON v.election_id = $1
-                AND v.voter_id IN (
-                    SELECT voter_id FROM voters 
-                    WHERE TRIM(national_id) = TRIM(cr.national_id)
-                )
+                ON vt.voter_id = v.voter_id
+                AND v.election_id = $1
 
             LEFT JOIN candidates c
                 ON v.candidate_id = c.candidate_id
 
             LEFT JOIN civil_registry cr_candidate
                 ON TRIM(c.national_id) = TRIM(cr_candidate.national_id)
+
+            WHERE DATE_PART('year', AGE(CURRENT_DATE, cr.birth_date)) >= 18
 
             ORDER BY voter_number ASC
             `,
