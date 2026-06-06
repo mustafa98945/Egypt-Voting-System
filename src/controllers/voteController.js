@@ -209,15 +209,14 @@ exports.getResults = async (req, res) => {
         const { governorate } = req.user;
 
         ////////////////////////////////////////////////////////////
-        // ✅ 1️⃣ هات آخر انتخابات اتعملت للمحافظة (مش شرط تكون نشطة)
+        // ✅ 1️⃣ هات آخر انتخابات منتهية للمحافظة
         ////////////////////////////////////////////////////////////
         const { rows: electionRows } = await pool.query(
-            `SELECT e.election_id, e.election_group_id
+            `SELECT e.election_id
              FROM elections e
-             JOIN election_groups eg 
-               ON e.election_group_id = eg.group_id
              WHERE TRIM(e.governorate) = TRIM($1)
-             ORDER BY eg.created_at DESC, e.created_at DESC
+             AND e.end_date < CURRENT_TIMESTAMP
+             ORDER BY e.end_date DESC
              LIMIT 1`,
             [governorate]
         );
@@ -237,10 +236,10 @@ exports.getResults = async (req, res) => {
         const electionId = electionRows[0].election_id;
 
         ////////////////////////////////////////////////////////////
-        // ✅ 2️⃣ إجمالي الأصوات للانتخابات دي
+        // ✅ 2️⃣ إجمالي الأصوات
         ////////////////////////////////////////////////////////////
         const { rows: totalVotesRows } = await pool.query(
-            `SELECT COUNT(vote_id)::INT AS total_votes
+            `SELECT COUNT(*)::INT AS total_votes
              FROM votes
              WHERE election_id = $1`,
             [electionId]
@@ -249,7 +248,7 @@ exports.getResults = async (req, res) => {
         const totalVotes = totalVotesRows[0]?.total_votes || 0;
 
         ////////////////////////////////////////////////////////////
-        // ✅ 3️⃣ جلب المرشحين وأصواتهم
+        // ✅ 3️⃣ جلب المرشحين المرتبطين بنفس election فقط
         ////////////////////////////////////////////////////////////
         const { rows } = await pool.query(
             `SELECT 
@@ -270,7 +269,7 @@ exports.getResults = async (req, res) => {
                ON c.candidate_id = v.candidate_id
                AND v.election_id = $1
              WHERE c.is_approved = TRUE
-             AND c.election_id = $1   -- ✅ مهم جداً
+             AND c.election_id = $1
              GROUP BY 
                 c.candidate_id,
                 cr.full_name,
@@ -298,8 +297,7 @@ exports.getResults = async (req, res) => {
         console.error("GetResults Error:", err);
         return res.status(500).json({
             success: false,
-            message: "Failed to get results",
-            error: err.message
+            message: err.message
         });
     }
 };
