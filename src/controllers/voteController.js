@@ -206,10 +206,7 @@ exports.getVoteCard = async (req, res) => {
 ////////////////////////////////////////////////////////////
 exports.getResults = async (req, res) => {
     try {
-
-        ////////////////////////////////////////////////////////////
         // ✅ هات آخر جروب فيه انتخابات approved
-        ////////////////////////////////////////////////////////////
         const { rows: groupRows } = await pool.query(
             `SELECT election_group_id
              FROM elections
@@ -228,33 +225,14 @@ exports.getResults = async (req, res) => {
 
         const groupId = groupRows[0].election_group_id;
 
-        ////////////////////////////////////////////////////////////
-        // ✅ هات كل الانتخابات في الجروب ده
-        ////////////////////////////////////////////////////////////
-        const { rows: elections } = await pool.query(
-            `SELECT election_id
-             FROM elections
-             WHERE election_group_id = $1`,
-            [groupId]
-        );
-
-        const ids = elections.map(e => e.election_id);
-
-        ////////////////////////////////////////////////////////////
-        // ✅ إجمالي الأصوات
-        ////////////////////////////////////////////////////////////
+        // ✅ إجمالي الأصوات بدون election_id
         const { rows: totalVotesRows } = await pool.query(
-            `SELECT COUNT(*)::INT AS total_votes
-             FROM votes
-             WHERE election_id = ANY($1::int[])`,
-            [ids]
+            `SELECT COUNT(*)::INT AS total_votes FROM votes`
         );
 
         const totalVotes = totalVotesRows[0]?.total_votes || 0;
 
-        ////////////////////////////////////////////////////////////
-        // ✅ جلب المرشحين وأصواتهم
-        ////////////////////////////////////////////////////////////
+        // ✅ جلب المرشحين وأصواتهم بدون election_id
         const { rows } = await pool.query(
             `SELECT 
                 c.candidate_id,
@@ -265,25 +243,21 @@ exports.getResults = async (req, res) => {
                 c.election_symbol_url,
                 COUNT(v.vote_id)::INT AS total_votes,
                 CASE 
-                    WHEN $2 = 0 THEN 0
-                    ELSE ROUND((COUNT(v.vote_id) * 100.0) / $2, 2)
+                    WHEN $1 = 0 THEN 0
+                    ELSE ROUND((COUNT(v.vote_id) * 100.0) / $1, 2)
                 END AS percentage
              FROM candidates c
-             LEFT JOIN civil_registry cr 
+             LEFT JOIN civil_registry cr
                ON TRIM(c.national_id) = TRIM(cr.national_id)
-             LEFT JOIN votes v 
+             LEFT JOIN votes v
                ON c.candidate_id = v.candidate_id
-               AND v.election_id = ANY($1::int[])
              WHERE c.is_approved = TRUE
              GROUP BY 
-                c.candidate_id,
-                cr.full_name,
-                cr.governorate,
-                c.personal_photos_url,
-                c.candidate_type,
+                c.candidate_id, cr.full_name, cr.governorate,
+                c.personal_photos_url, c.candidate_type,
                 c.election_symbol_url
              ORDER BY total_votes DESC`,
-            [ids, totalVotes]
+            [totalVotes]
         );
 
         res.json({
