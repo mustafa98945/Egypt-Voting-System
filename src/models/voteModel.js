@@ -2,42 +2,51 @@ const { pool } = require('../config/db');
 
 const Vote = {
 
-    // 1️⃣ التحقق من حالة التصويت
-    checkIfVoted: async (tableName, idColumn, userId) => {
-        const query = `SELECT has_voted FROM ${tableName} WHERE ${idColumn} = $1`;
-        const result = await pool.query(query, [userId]);
+    // 1️⃣ التحقق من حالة التصويت — من جدول votes مباشرة
+    checkIfVoted: async (userId, userRole, electionId) => {
+        const query = `
+            SELECT vote_id 
+            FROM votes 
+            WHERE voter_id = $1 
+            AND voter_role = $2 
+            AND election_id = $3
+            LIMIT 1
+        `;
+        const result = await pool.query(query, [userId, userRole, electionId]);
         return result.rows.length > 0 ? result.rows[0] : null;
     },
 
-    // 2️⃣ تنفيذ التصويت (معدل لإضافة election_id)
-    executeVote: async (
-        userRole,
-        userId,
-        candidateId,
-        tableName,
-        idColumn,
-        electionId   // ✅ أضفناها هنا
-    ) => {
+    // 2️⃣ تنفيذ التصويت
+    executeVote: async (userRole, userId, candidateId, tableName, idColumn, electionId) => {
         const client = await pool.connect();
         try {
             await client.query('BEGIN');
 
+            // ✅ double-check داخل الـ transaction لتجنب race condition
+            const existing = await client.query(
+                `SELECT vote_id FROM votes 
+                 WHERE voter_id = $1 AND voter_role = $2 AND election_id = $3`,
+                [userId, userRole, electionId]
+            );
+
+            if (existing.rows.length > 0) {
+                await client.query('ROLLBACK');
+                return { success: false, alreadyVoted: true };
+            }
+
             await client.query(
-                `INSERT INTO votes 
-                 (voter_id, candidate_id, voter_role, election_id, created_at) 
+                `INSERT INTO votes (voter_id, candidate_id, voter_role, election_id, created_at) 
                  VALUES ($1, $2, $3, $4, NOW())`,
-                [userId, candidateId, userRole, electionId]  // ✅ هنا
+                [userId, candidateId, userRole, electionId]
             );
 
             await client.query(
-                `UPDATE ${tableName} 
-                 SET has_voted = TRUE 
-                 WHERE ${idColumn} = $1`,
+                `UPDATE ${tableName} SET has_voted = TRUE WHERE ${idColumn} = $1`,
                 [userId]
             );
 
             await client.query('COMMIT');
-            return { success: true };
+            return { success: true, alreadyVoted: false };
 
         } catch (error) {
             await client.query('ROLLBACK');
