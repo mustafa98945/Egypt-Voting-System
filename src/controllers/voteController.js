@@ -18,8 +18,7 @@ exports.castVote = async (req, res) => {
         const { rows: electionRows } = await pool.query(
             `SELECT e.election_id
              FROM elections e
-             JOIN election_groups eg
-               ON e.election_group_id = eg.group_id
+             JOIN election_groups eg ON e.election_group_id = eg.group_id
              WHERE eg.is_closed = FALSE
              AND TRIM(e.governorate) = TRIM($1)
              AND CURRENT_TIMESTAMP BETWEEN e.start_date AND e.end_date
@@ -36,6 +35,22 @@ exports.castVote = async (req, res) => {
         }
 
         const electionId = electionRows[0].election_id;
+
+        // ✅ CHECK صريح بدل الاعتماد على DB error
+        const { rows: existingVote } = await pool.query(
+            `SELECT vote_id FROM votes
+             WHERE voter_id = $1
+             AND election_id = $2
+             LIMIT 1`,
+            [id, electionId]
+        );
+
+        if (existingVote.length > 0) {
+            return res.status(400).json({
+                success: false,
+                message: "You have already voted in this election"
+            });
+        }
 
         try {
             await pool.query(
@@ -66,7 +81,6 @@ exports.castVote = async (req, res) => {
         });
     }
 };
-
 ////////////////////////////////////////////////////////////
 // --- 2. Check Voting Status ---
 ////////////////////////////////////////////////////////////
