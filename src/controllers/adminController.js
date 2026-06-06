@@ -631,7 +631,7 @@ exports.deleteParty = async (req, res) => {
 };
 
 // --- 1. نتايج الانتخابات للـ Admin ---
-exports.getResults = async (req, res) => {
+exports.getElectionResults = async (req, res) => {
     try {
 
         ////////////////////////////////////////////////////////////
