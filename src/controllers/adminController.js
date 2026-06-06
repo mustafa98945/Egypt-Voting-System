@@ -845,7 +845,30 @@ exports.getVotersStatus = async (req, res) => {
     try {
 
         ////////////////////////////////////////////////////////////
-        // ✅ Get voters status (Always return voted_for safely)
+        // ✅ تحديد الانتخابات النشطة
+        ////////////////////////////////////////////////////////////
+        const { rows: electionRows } = await pool.query(`
+            SELECT e.election_id
+            FROM elections e
+            JOIN election_groups eg 
+              ON e.election_group_id = eg.group_id
+            WHERE eg.is_closed = FALSE
+            AND CURRENT_TIMESTAMP BETWEEN e.start_date AND e.end_date
+            ORDER BY e.created_at DESC
+            LIMIT 1
+        `);
+
+        if (electionRows.length === 0) {
+            return res.json({
+                success: true,
+                data: []
+            });
+        }
+
+        const electionId = electionRows[0].election_id;
+
+        ////////////////////////////////////////////////////////////
+        // ✅ جلب حالة كل الناخبين بالنسبة للانتخابات الحالية فقط
         ////////////////////////////////////////////////////////////
         const { rows } = await pool.query(
             `
@@ -854,29 +877,22 @@ exports.getVotersStatus = async (req, res) => {
                 vt.national_id AS v_national_id,
                 cr_voter.full_name AS v_name,
 
-                -- ✅ اسم المرشح المصوت له
                 COALESCE(cr_candidate.full_name, 'Has Not Voted Yet') AS voted_for,
 
-                -- ✅ الحالة
                 CASE 
-                    WHEN EXISTS (
-                        SELECT 1
-                        FROM votes v
-                        JOIN elections e ON v.election_id = e.election_id
-                        JOIN election_groups eg ON e.election_group_id = eg.group_id
-                        WHERE v.voter_id = vt.voter_id
-                        AND eg.is_closed = FALSE
-                    )
+                    WHEN v.vote_id IS NOT NULL
                     THEN 'Voted'
                     ELSE 'Not Voted Yet'
                 END AS status
 
             FROM voters vt
+
             LEFT JOIN civil_registry cr_voter
                 ON TRIM(vt.national_id) = TRIM(cr_voter.national_id)
 
             LEFT JOIN votes v
                 ON vt.voter_id = v.voter_id
+                AND v.election_id = $1   -- ✅ مهم جداً
 
             LEFT JOIN candidates c
                 ON v.candidate_id = c.candidate_id
@@ -884,22 +900,20 @@ exports.getVotersStatus = async (req, res) => {
             LEFT JOIN civil_registry cr_candidate
                 ON TRIM(c.national_id) = TRIM(cr_candidate.national_id)
 
-            GROUP BY 
-                vt.voter_id,
-                vt.national_id,
-                cr_voter.full_name,
-                cr_candidate.full_name
-
             ORDER BY voter_number ASC
-            `
+            `,
+            [electionId]
         );
 
         res.json({
             success: true,
+            election_id: electionId,
+            total_voters: rows.length,
             data: rows
         });
 
     } catch (err) {
+        console.error("GetVotersStatus Error:", err);
         res.status(500).json({
             success: false,
             message: err.message
