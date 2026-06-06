@@ -209,14 +209,14 @@ exports.getResults = async (req, res) => {
         const { governorate } = req.user;
 
         ////////////////////////////////////////////////////////////
-        // ✅ 1️⃣ هات آخر انتخابات منتهية للمحافظة
+        // ✅ 1️⃣ هات آخر انتخابات معمولها approval للمحافظة
         ////////////////////////////////////////////////////////////
         const { rows: electionRows } = await pool.query(
             `SELECT e.election_id
              FROM elections e
              WHERE TRIM(e.governorate) = TRIM($1)
-             AND e.end_date < CURRENT_TIMESTAMP
-             ORDER BY e.end_date DESC
+             AND e.result_status = 'approved'   -- ✅ الأساس هنا
+             ORDER BY e.created_at DESC
              LIMIT 1`,
             [governorate]
         );
@@ -248,7 +248,7 @@ exports.getResults = async (req, res) => {
         const totalVotes = totalVotesRows[0]?.total_votes || 0;
 
         ////////////////////////////////////////////////////////////
-        // ✅ 3️⃣ جلب المرشحين المرتبطين بنفس election فقط
+        // ✅ 3️⃣ جلب المرشحين لنفس election فقط
         ////////////////////////////////////////////////////////////
         const { rows } = await pool.query(
             `SELECT 
@@ -280,9 +280,6 @@ exports.getResults = async (req, res) => {
             [electionId, totalVotes]
         );
 
-        ////////////////////////////////////////////////////////////
-        // ✅ 4️⃣ رجع النتيجة
-        ////////////////////////////////////////////////////////////
         return res.json({
             success: true,
             election_id: electionId,
