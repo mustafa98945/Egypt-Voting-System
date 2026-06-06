@@ -634,9 +634,7 @@ exports.deleteParty = async (req, res) => {
 exports.getElectionResults = async (req, res) => {
     try {
 
-        ////////////////////////////////////////////////////////////
-        // ✅ 1️⃣ Get latest election group (open or closed)
-        ////////////////////////////////////////////////////////////
+        // ✅ 1️⃣ Get latest election group
         const { rows: groupRows } = await pool.query(
             `SELECT group_id
              FROM election_groups
@@ -649,26 +647,18 @@ exports.getElectionResults = async (req, res) => {
                 success: true,
                 election: null,
                 voters: 0,
-                summary: {
-                    total_votes: 0,
-                    total_candidates: 0
-                },
+                summary: { total_votes: 0, total_candidates: 0 },
                 data: []
             });
         }
 
         const groupId = groupRows[0].group_id;
 
-        ////////////////////////////////////////////////////////////
         // ✅ 2️⃣ Get election info
-        ////////////////////////////////////////////////////////////
         const { rows: electionRows } = await pool.query(
-            `SELECT e.election_id,
-                    e.election_name,
-                    e.start_date,
-                    e.end_date,
-                    e.result_status,
-                    e.logo_url
+            `SELECT e.election_id, e.election_name,
+                    e.start_date, e.end_date,
+                    e.result_status, e.logo_url
              FROM elections e
              WHERE e.election_group_id = $1
              ORDER BY e.created_at DESC
@@ -678,23 +668,14 @@ exports.getElectionResults = async (req, res) => {
 
         const election = electionRows[0] || null;
 
-        ////////////////////////////////////////////////////////////
-        // ✅ 3️⃣ Count total votes
-        ////////////////////////////////////////////////////////////
+        // ✅ 3️⃣ Count total votes (بدون election_id)
         const { rows: voteRows } = await pool.query(
-            `SELECT COUNT(v.vote_id)::INT AS total_votes
-             FROM votes v
-             JOIN elections e
-               ON v.election_id = e.election_id
-             WHERE e.election_group_id = $1`,
-            [groupId]
+            `SELECT COUNT(*)::INT AS total_votes FROM votes`
         );
 
         const totalVotes = voteRows[0]?.total_votes || 0;
 
-        ////////////////////////////////////////////////////////////
-        // ✅ 4️⃣ Get ALL approved candidates (even if 0 votes)
-        ////////////////////////////////////////////////////////////
+        // ✅ 4️⃣ Get ALL approved candidates with votes
         const { rows } = await pool.query(
             `SELECT 
                 c.candidate_id,
@@ -708,25 +689,16 @@ exports.getElectionResults = async (req, res) => {
                ON TRIM(c.national_id) = TRIM(cr.national_id)
              LEFT JOIN votes v
                ON c.candidate_id = v.candidate_id
-               AND v.election_id IN (
-                   SELECT election_id
-                   FROM elections
-                   WHERE election_group_id = $1
-               )
              WHERE c.is_approved = TRUE
              GROUP BY 
-                c.candidate_id,
-                cr.full_name,
+                c.candidate_id, cr.full_name,
                 c.personal_photos_url,
                 c.candidate_type,
                 c.election_symbol_url
-             ORDER BY total_votes DESC`,
-            [groupId]
+             ORDER BY total_votes DESC`
         );
 
-        ////////////////////////////////////////////////////////////
-        // ✅ 5️⃣ Final Response (متوافق 100% مع الفرونت)
-        ////////////////////////////////////////////////////////////
+        // ✅ 5️⃣ Response
         res.json({
             success: true,
             election: election,
