@@ -437,6 +437,10 @@ exports.deleteCandidate = async (req, res) => {
 
 exports.getDashboardStats = async (req, res) => {
     try {
+
+        ////////////////////////////////////////////////////////////
+        // ✅ Get latest CLOSED election group (for votes only)
+        ////////////////////////////////////////////////////////////
         const { rows: groupRows } = await pool.query(
             `SELECT group_id
              FROM election_groups
@@ -445,38 +449,42 @@ exports.getDashboardStats = async (req, res) => {
              LIMIT 1`
         );
 
-        if (groupRows.length === 0) {
-            return res.json({
-                success: true,
-                data: { voters: 0, candidates: 0 }
-            });
+        let totalVoters = 0;
+
+        if (groupRows.length > 0) {
+            const groupId = groupRows[0].group_id;
+
+            const { rows: voterRows } = await pool.query(
+                `SELECT COUNT(*)::INT AS total_voters
+                 FROM votes v
+                 JOIN elections e
+                   ON v.election_id = e.election_id
+                 WHERE e.election_group_id = $1`,
+                [groupId]
+            );
+
+            totalVoters = voterRows[0]?.total_voters || 0;
         }
 
-        const groupId = groupRows[0].group_id;
-
-        const { rows } = await pool.query(
-            `SELECT 
-                (
-                    SELECT COUNT(*)
-                    FROM votes v
-                    JOIN elections e
-                      ON v.election_id = e.election_id
-                    WHERE e.election_group_id = $1
-                )::INT AS total_voters,
-
-                (
-                    SELECT COUNT(*)
-                    FROM candidates
-                    WHERE is_approved = TRUE
-                )::INT AS total_candidates`,
-            [groupId]
+        ////////////////////////////////////////////////////////////
+        // ✅ Count ALL approved candidates in the system
+        ////////////////////////////////////////////////////////////
+        const { rows: candidateRows } = await pool.query(
+            `SELECT COUNT(*)::INT AS total_candidates
+             FROM candidates
+             WHERE is_approved = TRUE`
         );
 
+        const totalCandidates = candidateRows[0]?.total_candidates || 0;
+
+        ////////////////////////////////////////////////////////////
+        // ✅ Response
+        ////////////////////////////////////////////////////////////
         res.json({
             success: true,
             data: {
-                voters: rows[0].total_voters,
-                candidates: rows[0].total_candidates
+                voters: totalVoters,          // ✅ عدد المصوتين في آخر دورة مقفولة
+                candidates: totalCandidates   // ✅ كل المرشحين في السيستم
             }
         });
 
@@ -642,9 +650,10 @@ exports.getElectionResults = async (req, res) => {
         );
 
         if (groupRows.length === 0) {
-            return res.status(404).json({
-                success: false,
-                message: "No closed election group found"
+            return res.json({
+                success: true,
+                voters: 0,
+                data: []
             });
         }
 
@@ -665,7 +674,7 @@ exports.getElectionResults = async (req, res) => {
         const totalVoters = votersRows[0]?.total_voters || 0;
 
         ////////////////////////////////////////////////////////////
-        // ✅ Get results
+        // ✅ Get results (حتى اللي صفر يظهر)
         ////////////////////////////////////////////////////////////
         const { rows } = await queryWithRetry(
             `SELECT 
@@ -679,8 +688,8 @@ exports.getElectionResults = async (req, res) => {
                ON c.candidate_id = v.candidate_id
              LEFT JOIN elections e
                ON v.election_id = e.election_id
-             WHERE c.is_approved = TRUE
                AND e.election_group_id = $1
+             WHERE c.is_approved = TRUE
              GROUP BY 
                 c.candidate_id,
                 cr.full_name
@@ -826,69 +835,38 @@ exports.getVotesData = async (req, res) => {
 
 exports.getVotersStatus = async (req, res) => {
     try {
-        const { rows } = await queryWithRetry(
-            `-- Voters
-             SELECT 
-                ROW_NUMBER() OVER (ORDER BY vt.voter_id) AS voter_number,
-                vt.national_id                           AS v_national_id,
-                cr_voter.full_name                       AS v_name,
-                'voter'                                  AS role,
+        const { rows } = await pool.query(
+            `SELECT 
+                vt.voter_id,
+                vt.national_id,
+                cr.full_name,
                 CASE 
-                    WHEN vt.has_voted = TRUE THEN cr_candidate.full_name
-                    ELSE 'Has Not Voted Yet'
-                END AS voted_for,
-                CASE 
-                    WHEN vt.has_voted = TRUE THEN 'Voted'
+                    WHEN EXISTS (
+                        SELECT 1
+                        FROM votes v
+                        JOIN elections e ON v.election_id = e.election_id
+                        JOIN election_groups eg ON e.election_group_id = eg.group_id
+                        WHERE v.voter_id = vt.voter_id
+                        AND eg.is_closed = FALSE
+                    )
+                    THEN 'Voted'
                     ELSE 'Not Voted Yet'
                 END AS status
              FROM voters vt
-             LEFT JOIN civil_registry cr_voter 
-               ON TRIM(vt.national_id) = TRIM(cr_voter.national_id)
-             LEFT JOIN votes v 
-               ON vt.voter_id = v.voter_id
-             LEFT JOIN candidates c 
-               ON v.candidate_id = c.candidate_id
-             LEFT JOIN civil_registry cr_candidate 
-               ON TRIM(c.national_id) = TRIM(cr_candidate.national_id)
-
-             UNION ALL
-
-             -- Candidates
-             SELECT 
-                ROW_NUMBER() OVER (ORDER BY cd.candidate_id) AS voter_number,
-                cd.national_id                               AS v_national_id,
-                cr_candidate.full_name                       AS v_name,
-                'candidate'                                  AS role,
-                CASE 
-                    WHEN cd.has_voted = TRUE THEN cr_voted_for.full_name
-                    ELSE 'Has Not Voted Yet'
-                END AS voted_for,
-                CASE 
-                    WHEN cd.has_voted = TRUE THEN 'Voted'
-                    ELSE 'Not Voted Yet'
-                END AS status
-             FROM candidates cd
-             LEFT JOIN civil_registry cr_candidate 
-               ON TRIM(cd.national_id) = TRIM(cr_candidate.national_id)
-             LEFT JOIN votes v 
-               ON cd.candidate_id = v.candidate_id 
-               AND v.voter_role = 'candidate'
-             LEFT JOIN candidates c_voted 
-               ON v.candidate_id = c_voted.candidate_id
-             LEFT JOIN civil_registry cr_voted_for 
-               ON TRIM(c_voted.national_id) = TRIM(cr_voted_for.national_id)
-             WHERE cd.is_approved = TRUE
-
-             ORDER BY role, voter_number ASC`
+             LEFT JOIN civil_registry cr
+               ON TRIM(vt.national_id) = TRIM(cr.national_id)
+             ORDER BY vt.voter_id ASC`
         );
 
         res.json({
             success: true,
-            count: rows.length,
             data: rows
         });
 
     } catch (err) {
-        res.status(500).json({ success: false, message: err.message });
+        res.status(500).json({
+            success: false,
+            message: err.message
+        });
     }
 };

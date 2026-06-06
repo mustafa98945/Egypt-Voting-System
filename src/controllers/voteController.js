@@ -16,7 +16,9 @@ exports.castVote = async (req, res) => {
             });
         }
 
-        // ✅ التصويت يحصل فقط في آخر جروب مفتوحة
+        ////////////////////////////////////////////////////////////
+        // ✅ Get active election in open group
+        ////////////////////////////////////////////////////////////
         const { rows: electionRows } = await pool.query(
             `SELECT e.election_id
              FROM elections e
@@ -39,13 +41,16 @@ exports.castVote = async (req, res) => {
 
         const electionId = electionRows[0].election_id;
 
-        // ✅ منع التصويت المكرر لنفس الانتخابات فقط
+        ////////////////////////////////////////////////////////////
+        // ✅ Prevent duplicate vote (same person + same role + same election)
+        ////////////////////////////////////////////////////////////
         const { rows: existingVote } = await pool.query(
             `SELECT 1 FROM votes
              WHERE voter_id = $1
-             AND election_id = $2
+             AND voter_role = $2
+             AND election_id = $3
              LIMIT 1`,
-            [id, electionId]
+            [id, role, electionId]
         );
 
         if (existingVote.length > 0) {
@@ -55,6 +60,9 @@ exports.castVote = async (req, res) => {
             });
         }
 
+        ////////////////////////////////////////////////////////////
+        // ✅ Insert vote
+        ////////////////////////////////////////////////////////////
         await pool.query(
             `INSERT INTO votes (voter_id, voter_role, candidate_id, election_id)
              VALUES ($1, $2, $3, $4)`,
@@ -73,7 +81,6 @@ exports.castVote = async (req, res) => {
         });
     }
 };
-
 ////////////////////////////////////////////////////////////
 // --- 2. Check Voting Status ---
 ////////////////////////////////////////////////////////////
