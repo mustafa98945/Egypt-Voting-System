@@ -630,7 +630,7 @@ exports.getElectionResults = async (req, res) => {
         // ✅ 2️⃣ Count total voters (people who actually voted)
         ////////////////////////////////////////////////////////////
         const { rows: votersRows } = await queryWithRetry(
-            `SELECT COUNT(DISTINCT voter_id)::INT AS total_voters
+            `SELECT COUNT(*)::INT AS total_voters
              FROM votes
              WHERE election_id = $1`,
             [election.election_id]
@@ -669,7 +669,7 @@ exports.getElectionResults = async (req, res) => {
         ////////////////////////////////////////////////////////////
         res.json({
             success: true,
-            voters: totalVoters, // ✅ عدد الناس اللي صوتت
+            voters: totalVoters, // ✅ عدد الناس اللي صوتت فعليًا
             election: {
                 id: election.election_id,
                 name: election.election_name,
@@ -681,13 +681,12 @@ exports.getElectionResults = async (req, res) => {
         });
 
     } catch (err) {
-        res.status(500).json({ 
-            success: false, 
-            message: err.message 
+        res.status(500).json({
+            success: false,
+            message: err.message
         });
     }
 };
-
 // --- 2. اعتماد أو إبطال النتيجة ---
 exports.decideElectionGroup = async (req, res) => {
     try {
