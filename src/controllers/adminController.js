@@ -802,14 +802,14 @@ exports.getVotersStatus = async (req, res) => {
         const electionId = electionRows[0].election_id;
 
         ////////////////////////////////////////////////////////////
-        // ✅ جلب حالة كل الناخبين بالنسبة للانتخابات الحالية فقط
+        // ✅ جلب كل المواطنين فوق 18 سنة من السجل المدني
         ////////////////////////////////////////////////////////////
         const { rows } = await pool.query(
             `
             SELECT 
-                ROW_NUMBER() OVER (ORDER BY vt.voter_id) AS voter_number,
-                vt.national_id AS v_national_id,
-                cr_voter.full_name AS v_name,
+                ROW_NUMBER() OVER (ORDER BY cr.national_id) AS voter_number,
+                cr.national_id AS v_national_id,
+                cr.full_name AS v_name,
 
                 COALESCE(cr_candidate.full_name, 'Has Not Voted Yet') AS voted_for,
 
@@ -819,14 +819,18 @@ exports.getVotersStatus = async (req, res) => {
                     ELSE 'Not Voted Yet'
                 END AS status
 
-            FROM voters vt
+            FROM civil_registry cr
 
-            LEFT JOIN civil_registry cr_voter
-                ON TRIM(vt.national_id) = TRIM(cr_voter.national_id)
+            -- ✅ شرط السن
+            WHERE DATE_PART('year', AGE(CURRENT_DATE, cr.birth_date)) >= 18
 
+            -- ✅ ربط الأصوات
             LEFT JOIN votes v
-                ON vt.voter_id = v.voter_id
-                AND v.election_id = $1   -- ✅ مهم جداً
+                ON v.election_id = $1
+                AND v.voter_id IN (
+                    SELECT voter_id FROM voters 
+                    WHERE TRIM(national_id) = TRIM(cr.national_id)
+                )
 
             LEFT JOIN candidates c
                 ON v.candidate_id = c.candidate_id
@@ -842,7 +846,7 @@ exports.getVotersStatus = async (req, res) => {
         res.json({
             success: true,
             election_id: electionId,
-            total_voters: rows.length,
+            total_people: rows.length,
             data: rows
         });
 
@@ -854,7 +858,6 @@ exports.getVotersStatus = async (req, res) => {
         });
     }
 };
-
 exports.getVotesData = async (req, res) => {
     try {
         const { rows } = await queryWithRetry(
