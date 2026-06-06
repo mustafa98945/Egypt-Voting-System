@@ -674,7 +674,7 @@ exports.getElectionResults = async (req, res) => {
         const totalVotes = voteRows[0]?.total_votes || 0;
 
         ////////////////////////////////////////////////////////////
-        // ✅ Get all approved candidates (حتى لو صفر)
+        // ✅ Get ALL approved candidates (even if 0 votes)
         ////////////////////////////////////////////////////////////
         const { rows } = await pool.query(
             `SELECT 
@@ -684,20 +684,22 @@ exports.getElectionResults = async (req, res) => {
              FROM candidates c
              LEFT JOIN civil_registry cr
                ON TRIM(c.national_id) = TRIM(cr.national_id)
+
+             -- ✅ الربط الصحيح هنا
              LEFT JOIN votes v
                ON c.candidate_id = v.candidate_id
-             LEFT JOIN elections e
-               ON v.election_id = e.election_id
-               AND e.election_group_id = $1
+               AND v.election_id IN (
+                   SELECT election_id
+                   FROM elections
+                   WHERE election_group_id = $1
+               )
+
              WHERE c.is_approved = TRUE
              GROUP BY c.candidate_id, cr.full_name
              ORDER BY total_votes DESC`,
             [groupId]
         );
 
-        ////////////////////////////////////////////////////////////
-        // ✅ Response
-        ////////////////////////////////////////////////////////////
         res.json({
             success: true,
             voters: totalVotes,
