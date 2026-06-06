@@ -47,17 +47,29 @@ exports.createElection = async (req, res) => {
             });
         }
 
-        ////////////////////////////////////////////////////////////
-        // ✅ مهم: حذف الأصوات القديمة عند إنشاء انتخابات جديدة
-        ////////////////////////////////////////////////////////////
-        await pool.query(`DELETE FROM votes`);
-
         const start = new Date(start_date);
         start.setHours(0, 0, 0, 0);
 
         const end = new Date(end_date);
         end.setHours(23, 59, 59, 999);
 
+        ////////////////////////////////////////////////////////////
+        // ✅ 1️⃣ أرشف أي انتخابات approved قديمة
+        ////////////////////////////////////////////////////////////
+        await pool.query(
+            `UPDATE elections
+             SET result_status = 'archived'
+             WHERE result_status = 'approved'`
+        );
+
+        ////////////////////////////////////////////////////////////
+        // ✅ 2️⃣ احذف الأصوات القديمة
+        ////////////////////////////////////////////////////////////
+        await pool.query(`DELETE FROM votes`);
+
+        ////////////////////////////////////////////////////////////
+        // ✅ 3️⃣ هات أو أنشئ group جديد
+        ////////////////////////////////////////////////////////////
         let { rows: groupRows } = await pool.query(
             `SELECT group_id 
              FROM election_groups 
@@ -78,12 +90,9 @@ exports.createElection = async (req, res) => {
             groupId = groupRows[0].group_id;
         }
 
-        let logoUrl = null;
-        if (logo_url) {
-            const fileName = `election_logo_${Date.now()}.jpg`;
-            logoUrl = await processAndUpload(logo_url, fileName);
-        }
-
+        ////////////////////////////////////////////////////////////
+        // ✅ 4️⃣ إنشاء الانتخابات الجديدة
+        ////////////////////////////////////////////////////////////
         const { rows } = await pool.query(
             `INSERT INTO elections 
              (election_type, election_name, governorate, logo_url, 
@@ -94,11 +103,22 @@ exports.createElection = async (req, res) => {
                 election_type,
                 election_name,
                 governorate,
-                logoUrl,
+                logo_url || null,
                 start,
                 end,
                 groupId
             ]
+        );
+
+        const newElectionId = rows[0].election_id;
+
+        ////////////////////////////////////////////////////////////
+        // ✅ 5️⃣ انقل كل المرشحين للانتخابات الجديدة
+        ////////////////////////////////////////////////////////////
+        await pool.query(
+            `UPDATE candidates
+             SET election_id = $1`,
+            [newElectionId]
         );
 
         res.status(201).json({

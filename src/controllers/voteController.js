@@ -208,7 +208,7 @@ exports.getResults = async (req, res) => {
     try {
 
         ////////////////////////////////////////////////////////////
-        // ✅ 1️⃣ هات آخر جروب فيه انتخابات approved
+        // ✅ هات آخر جروب فيه انتخابات approved
         ////////////////////////////////////////////////////////////
         const { rows: groupRows } = await pool.query(
             `SELECT election_group_id
@@ -221,10 +221,7 @@ exports.getResults = async (req, res) => {
         if (groupRows.length === 0) {
             return res.json({
                 success: true,
-                summary: {
-                    total_votes: 0,
-                    total_candidates: 0
-                },
+                summary: { total_votes: 0, total_candidates: 0 },
                 data: []
             });
         }
@@ -232,19 +229,19 @@ exports.getResults = async (req, res) => {
         const groupId = groupRows[0].election_group_id;
 
         ////////////////////////////////////////////////////////////
-        // ✅ 2️⃣ هات كل elections جوه الجروب ده
+        // ✅ هات كل الانتخابات في الجروب ده
         ////////////////////////////////////////////////////////////
-        const { rows: electionIds } = await pool.query(
+        const { rows: elections } = await pool.query(
             `SELECT election_id
              FROM elections
              WHERE election_group_id = $1`,
             [groupId]
         );
 
-        const ids = electionIds.map(e => e.election_id);
+        const ids = elections.map(e => e.election_id);
 
         ////////////////////////////////////////////////////////////
-        // ✅ 3️⃣ إجمالي الأصوات لكل الجروب
+        // ✅ إجمالي الأصوات
         ////////////////////////////////////////////////////////////
         const { rows: totalVotesRows } = await pool.query(
             `SELECT COUNT(*)::INT AS total_votes
@@ -256,7 +253,7 @@ exports.getResults = async (req, res) => {
         const totalVotes = totalVotesRows[0]?.total_votes || 0;
 
         ////////////////////////////////////////////////////////////
-        // ✅ 4️⃣ جلب كل المرشحين وأصواتهم داخل الجروب
+        // ✅ جلب المرشحين وأصواتهم
         ////////////////////////////////////////////////////////////
         const { rows } = await pool.query(
             `SELECT 
@@ -289,7 +286,7 @@ exports.getResults = async (req, res) => {
             [ids, totalVotes]
         );
 
-        return res.json({
+        res.json({
             success: true,
             group_id: groupId,
             summary: {
@@ -301,7 +298,7 @@ exports.getResults = async (req, res) => {
 
     } catch (err) {
         console.error("GetResults Error:", err);
-        return res.status(500).json({
+        res.status(500).json({
             success: false,
             message: err.message
         });

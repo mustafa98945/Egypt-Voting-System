@@ -286,34 +286,22 @@ exports.loginCandidate = async (req, res) => {
 ////////////////////////////////////////////////////////////
 exports.listCandidates = async (req, res) => {
     try {
-        const userUnit = req.user.administrative_unit;
-        const userGov  = req.user.governorate;
-
-        if (!userUnit || !userGov) {
-            return res.json({
-                success: true,
-                count: 0,
-                data: []
-            });
-        }
+        const { governorate } = req.user;
 
         ////////////////////////////////////////////////////////////
-        // ✅ 1️⃣ التحقق من وجود انتخابات نشطة
+        // ✅ 1️⃣ هات الانتخابات النشطة الحالية
         ////////////////////////////////////////////////////////////
         const { rows: electionRows } = await pool.query(
-            `SELECT e.election_id
-             FROM elections e
-             JOIN election_groups eg 
-               ON e.election_group_id = eg.group_id
-             WHERE eg.is_closed = FALSE
-             AND TRIM(e.governorate) = TRIM($1)
-             AND CURRENT_TIMESTAMP BETWEEN e.start_date AND e.end_date
-             ORDER BY e.created_at DESC
+            `SELECT election_id
+             FROM elections
+             WHERE result_status = 'pending'
+             AND is_active = TRUE
+             AND TRIM(governorate) = TRIM($1)
+             ORDER BY created_at DESC
              LIMIT 1`,
-            [userGov]
+            [governorate]
         );
 
-        // ✅ لو مفيش انتخابات → رجع data فاضية بس
         if (electionRows.length === 0) {
             return res.json({
                 success: true,
@@ -325,35 +313,26 @@ exports.listCandidates = async (req, res) => {
         const electionId = electionRows[0].election_id;
 
         ////////////////////////////////////////////////////////////
-        // ✅ 2️⃣ جلب المرشحين لنفس الانتخابات فقط
+        // ✅ 2️⃣ هات المرشحين المرتبطين بالانتخابات دي
         ////////////////////////////////////////////////////////////
         const { rows } = await pool.query(
             `SELECT 
                 c.candidate_id,
-                cr.full_name AS name,
-                DATE_PART('year', AGE(CURRENT_DATE, cr.birth_date))::INT AS age,
-                cr.degree,
-                cr.governorate AS government,
-                c.short_bio,
-                c.personal_photos_url AS personal_photo,
-                c.election_symbol_url AS symbol
+                cr.full_name,
+                cr.governorate,
+                c.personal_photos_url,
+                c.candidate_type,
+                c.election_symbol_url
              FROM candidates c
-             JOIN civil_registry cr
+             LEFT JOIN civil_registry cr
                ON TRIM(c.national_id) = TRIM(cr.national_id)
-             JOIN electoral_districts ed
-               ON TRIM(cr.administrative_unit) = TRIM(ed.district_name)
-             WHERE TRIM(cr.administrative_unit) = TRIM($1)
-             AND TRIM(ed.governorate) = TRIM($2)
-             AND c.is_approved = TRUE
-             AND c.election_id = $3
+             WHERE c.is_approved = TRUE
+             AND c.election_id = $1
              ORDER BY c.created_at DESC`,
-            [userUnit, userGov, electionId]
+            [electionId]
         );
 
-        ////////////////////////////////////////////////////////////
-        // ✅ نفس شكل الريسبونس القديم
-        ////////////////////////////////////////////////////////////
-        return res.json({
+        res.json({
             success: true,
             count: rows.length,
             data: rows
@@ -361,10 +340,9 @@ exports.listCandidates = async (req, res) => {
 
     } catch (err) {
         console.error("List Candidates Error:", err);
-        return res.json({
-            success: true,
-            count: 0,
-            data: []
+        res.status(500).json({
+            success: false,
+            message: err.message
         });
     }
 };
