@@ -131,15 +131,18 @@ exports.getVoteCard = async (req, res) => {
 ////////////////////////////////////////////////////////////
 exports.getResults = async (req, res) => {
     try {
-        const { rows: groupRows } = await pool.query(
-            `SELECT election_group_id
-             FROM elections
-             WHERE result_status = 'approved'
+
+        ////////////////////////////////////////////////////////////
+        // ✅ 1️⃣ هات أحدث جروب
+        ////////////////////////////////////////////////////////////
+        const { rows: latestGroupRows } = await pool.query(
+            `SELECT group_id
+             FROM election_groups
              ORDER BY created_at DESC
              LIMIT 1`
         );
 
-        if (groupRows.length === 0) {
+        if (latestGroupRows.length === 0) {
             return res.json({
                 success: true,
                 summary: { total_votes: 0, total_candidates: 0 },
@@ -147,26 +150,46 @@ exports.getResults = async (req, res) => {
             });
         }
 
-        const groupId = groupRows[0].election_group_id;
+        const latestGroupId = latestGroupRows[0].group_id;
 
-        const { rows: electionRows } = await pool.query(
+        ////////////////////////////////////////////////////////////
+        // ✅ 2️⃣ هل الجروب ده فيه election approved؟
+        ////////////////////////////////////////////////////////////
+        const { rows: approvedRows } = await pool.query(
             `SELECT election_id
              FROM elections
-             WHERE election_group_id = $1`,
-            [groupId]
+             WHERE election_group_id = $1
+             AND result_status = 'approved'
+             LIMIT 1`,
+            [latestGroupId]
         );
 
-        const ids = electionRows.map(e => e.election_id);
+        // ✅ لو الجروب الجديد لسه pending → مفيش نتائج
+        if (approvedRows.length === 0) {
+            return res.json({
+                success: true,
+                summary: { total_votes: 0, total_candidates: 0 },
+                data: []
+            });
+        }
 
+        const electionId = approvedRows[0].election_id;
+
+        ////////////////////////////////////////////////////////////
+        // ✅ 3️⃣ إجمالي الأصوات الخاصة بالانتخابات دي فقط
+        ////////////////////////////////////////////////////////////
         const { rows: totalVotesRows } = await pool.query(
             `SELECT COUNT(*)::INT AS total_votes
              FROM votes
-             WHERE election_id = ANY($1::int[])`,
-            [ids]
+             WHERE election_id = $1`,
+            [electionId]
         );
 
         const totalVotes = totalVotesRows[0]?.total_votes || 0;
 
+        ////////////////////////////////////////////////////////////
+        // ✅ 4️⃣ المرشحين وأصواتهم
+        ////////////////////////////////////////////////////////////
         const { rows } = await pool.query(
             `SELECT 
                 c.candidate_id,
@@ -181,11 +204,11 @@ exports.getResults = async (req, res) => {
                     ELSE ROUND((COUNT(v.vote_id) * 100.0) / $2, 2)
                 END AS percentage
              FROM candidates c
-             LEFT JOIN civil_registry cr 
+             LEFT JOIN civil_registry cr
                ON TRIM(c.national_id) = TRIM(cr.national_id)
-             LEFT JOIN votes v 
+             LEFT JOIN votes v
                ON c.candidate_id = v.candidate_id
-               AND v.election_id = ANY($1::int[])
+               AND v.election_id = $1
              WHERE c.is_approved = TRUE
              GROUP BY 
                 c.candidate_id,
@@ -195,12 +218,12 @@ exports.getResults = async (req, res) => {
                 c.candidate_type,
                 c.election_symbol_url
              ORDER BY total_votes DESC`,
-            [ids, totalVotes]
+            [electionId, totalVotes]
         );
 
         res.json({
             success: true,
-            group_id: groupId,
+            group_id: latestGroupId,
             summary: {
                 total_votes: totalVotes,
                 total_candidates: rows.length
@@ -209,7 +232,7 @@ exports.getResults = async (req, res) => {
         });
 
     } catch (err) {
-        console.error("GetResults Error:", err);
+        console.error("GetResults Error:", err.message);
         res.status(500).json({
             success: false,
             message: err.message
