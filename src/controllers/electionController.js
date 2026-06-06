@@ -276,10 +276,51 @@ exports.deleteElection = async (req, res) => {
     try {
         const { id } = req.params;
 
+        // ✅ نتأكد إن الانتخابات موجودة
+        const { rows: electionRows } = await pool.query(
+            'SELECT * FROM elections WHERE election_id = $1',
+            [id]
+        );
+
+        if (electionRows.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: "Election not found"
+            });
+        }
+
+        const groupId = electionRows[0].election_group_id;
+
+        ////////////////////////////////////////////////////////////
+        // ✅ 1️⃣ امسح الأصوات المرتبطة بالانتخابات
+        ////////////////////////////////////////////////////////////
+        await pool.query(
+            'DELETE FROM votes WHERE election_id = $1',
+            [id]
+        );
+
+        ////////////////////////////////////////////////////////////
+        // ✅ 2️⃣ امسح الانتخابات
+        ////////////////////////////////////////////////////////////
         await pool.query(
             'DELETE FROM elections WHERE election_id = $1',
             [id]
         );
+
+        ////////////////////////////////////////////////////////////
+        // ✅ 3️⃣ لو مفيش انتخابات تانية في نفس الجروب امسح الجروب
+        ////////////////////////////////////////////////////////////
+        const { rows: remaining } = await pool.query(
+            'SELECT * FROM elections WHERE election_group_id = $1',
+            [groupId]
+        );
+
+        if (remaining.length === 0) {
+            await pool.query(
+                'DELETE FROM election_groups WHERE group_id = $1',
+                [groupId]
+            );
+        }
 
         res.json({
             success: true,
@@ -287,7 +328,10 @@ exports.deleteElection = async (req, res) => {
         });
 
     } catch (err) {
-        res.status(500).json({ success: false, message: err.message });
+        res.status(500).json({
+            success: false,
+            message: err.message
+        });
     }
 };
 
