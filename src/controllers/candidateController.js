@@ -286,52 +286,60 @@ exports.loginCandidate = async (req, res) => {
 ////////////////////////////////////////////////////////////
 exports.listCandidates = async (req, res) => {
     try {
-        const { governorate } = req.user;
+        const userUnit = req.user.administrative_unit;
+        const userGov = req.user.governorate;
 
-        ////////////////////////////////////////////////////////////
-        // ✅ هات الانتخابات pending فقط
-        ////////////////////////////////////////////////////////////
-        const { rows: electionRows } = await pool.query(
-            `SELECT election_id
-             FROM elections
-             WHERE result_status = 'pending'
-             AND TRIM(governorate) = TRIM($1)
-             ORDER BY created_at DESC
-             LIMIT 1`,
-            [governorate]
-        );
-
-        if (electionRows.length === 0) {
-            return res.json({
-                success: true,
-                count: 0,
-                data: []
+        if (!userUnit || !userGov) {
+            return res.status(400).json({
+                success: false,
+                message: "User data is incomplete"
             });
         }
 
-        const electionId = electionRows[0].election_id;
+        // ✅ تحقق إن في انتخابات شغالة للمحافظة
+        const { rows: electionRows } = await pool.query(
+            `SELECT election_id
+             FROM elections
+             WHERE is_active = TRUE
+             AND TRIM(governorate) = TRIM($1)
+             AND CURRENT_TIMESTAMP >= start_date
+             AND CURRENT_TIMESTAMP <= end_date
+             ORDER BY created_at DESC
+             LIMIT 1`,
+            [userGov]
+        );
 
-        ////////////////////////////////////////////////////////////
-        // ✅ هات المرشحين approved لنفس المحافظة
-        ////////////////////////////////////////////////////////////
+        if (electionRows.length === 0) {
+            return res.status(403).json({
+                success: false,
+                message: "There are no active elections in your governorate at the moment"
+            });
+        }
+
+        // ✅ جلب المرشحين مع التأكد إن الدائرة تبع نفس المحافظة
         const { rows } = await pool.query(
             `SELECT 
                 c.candidate_id,
-                cr.full_name,
-                cr.governorate,
-                c.personal_photos_url,
-                c.candidate_type,
-                c.election_symbol_url
+                cr.full_name AS name,
+                DATE_PART('year', AGE(CURRENT_DATE, cr.birth_date))::INT AS age,
+                cr.degree,
+                cr.governorate AS government,
+                c.short_bio,
+                c.personal_photos_url AS personal_photo,
+                c.election_symbol_url AS symbol
              FROM candidates c
-             LEFT JOIN civil_registry cr
+             JOIN civil_registry cr
                ON TRIM(c.national_id) = TRIM(cr.national_id)
-             WHERE c.is_approved = TRUE
-             AND TRIM(cr.governorate) = TRIM($1)
+             JOIN electoral_districts ed
+               ON TRIM(cr.administrative_unit) = TRIM(ed.district_name)
+             WHERE TRIM(cr.administrative_unit) = TRIM($1)
+             AND TRIM(ed.governorate) = TRIM($2)
+             AND c.is_approved = TRUE
              ORDER BY c.created_at DESC`,
-            [governorate]
+            [userUnit, userGov]
         );
 
-        return res.json({
+        res.json({
             success: true,
             count: rows.length,
             data: rows
@@ -341,7 +349,7 @@ exports.listCandidates = async (req, res) => {
         console.error("List Candidates Error:", err);
         res.status(500).json({
             success: false,
-            message: err.message
+            message: "Error loading candidates list"
         });
     }
 };

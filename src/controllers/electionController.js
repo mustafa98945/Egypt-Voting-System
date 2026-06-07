@@ -53,76 +53,61 @@ exports.createElection = async (req, res) => {
         const end = new Date(end_date);
         end.setHours(23, 59, 59, 999);
 
-        ////////////////////////////////////////////////////////////
-        // ✅ 1️⃣ أرشف أي انتخابات approved قديمة
-        ////////////////////////////////////////////////////////////
-        await pool.query(
-            `UPDATE elections
-             SET result_status = 'archived',
-                 is_active = FALSE
-             WHERE result_status = 'approved'`
+        let { rows: groupRows } = await pool.query(
+            `SELECT group_id 
+             FROM election_groups 
+             WHERE is_closed = FALSE 
+             ORDER BY created_at DESC 
+             LIMIT 1`
         );
 
-        ////////////////////////////////////////////////////////////
-        // ✅ 2️⃣ احذف الأصوات القديمة
-        ////////////////////////////////////////////////////////////
-        await pool.query(`DELETE FROM votes`);
+        let groupId;
 
-        ////////////////////////////////////////////////////////////
-        // ✅ 3️⃣ أنشئ group جديد دائمًا
-        ////////////////////////////////////////////////////////////
-        const { rows: newGroup } = await pool.query(
-            `INSERT INTO election_groups DEFAULT VALUES
-             RETURNING group_id`
-        );
+        if (groupRows.length === 0) {
+            const { rows: newGroup } = await pool.query(
+                `INSERT INTO election_groups DEFAULT VALUES
+                 RETURNING group_id`
+            );
+            groupId = newGroup[0].group_id;
+        } else {
+            groupId = groupRows[0].group_id;
+        }
 
-        const groupId = newGroup[0].group_id;
+        let logoUrl = null;
+        if (logo_url) {
+            const fileName = `election_logo_${Date.now()}.jpg`;
+            logoUrl = await processAndUpload(logo_url, fileName);
+        }
 
-        ////////////////////////////////////////////////////////////
-        // ✅ 4️⃣ إنشاء الانتخابات الجديدة
-        ////////////////////////////////////////////////////////////
         const { rows } = await pool.query(
             `INSERT INTO elections 
              (election_type, election_name, governorate, logo_url, 
-              start_date, end_date, is_active, election_group_id, result_status)
-             VALUES ($1, $2, $3, $4, $5, $6, TRUE, $7, 'pending')
+              start_date, end_date, is_active, election_group_id)
+             VALUES ($1, $2, $3, $4, $5, $6, TRUE, $7)
              RETURNING *`,
             [
                 election_type,
                 election_name,
                 governorate,
-                logo_url || null,
+                logoUrl,
                 start,
                 end,
                 groupId
             ]
         );
 
-        const newElectionId = rows[0].election_id;
-
-        ////////////////////////////////////////////////////////////
-        // ✅ 5️⃣ انقل كل المرشحين للانتخابات الجديدة
-        ////////////////////////////////////////////////////////////
-        await pool.query(
-            `UPDATE candidates
-             SET election_id = $1`,
-            [newElectionId]
-        );
-
         res.status(201).json({
             success: true,
-            message: "Election created successfully ✅",
+            message: "Election created successfully",
             data: rows[0]
         });
 
     } catch (err) {
         console.error("Create Election Error:", err);
-        res.status(500).json({
-            success: false,
-            message: err.message
-        });
+        res.status(500).json({ success: false, message: err.message });
     }
 };
+
 ////////////////////////////////////////////////////////////
 // ✅ 2. Edit Election
 ////////////////////////////////////////////////////////////
@@ -209,23 +194,22 @@ exports.getElectionStatus = async (req, res) => {
     try {
         const { rows } = await pool.query(
             `SELECT 
-                e.election_id,
-                e.election_type,
-                e.election_name,
-                e.governorate,
-                e.logo_url,
-                e.start_date,
-                e.end_date,
+                election_id,
+                election_type,
+                election_name,
+                governorate,
+                logo_url,
+                start_date,
+                end_date,
                 CASE 
-                    WHEN CURRENT_TIMESTAMP < e.start_date THEN 'not_started'
-                    WHEN CURRENT_TIMESTAMP BETWEEN e.start_date AND e.end_date THEN 'active'
+                    WHEN CURRENT_TIMESTAMP < start_date THEN 'not_started'
+                    WHEN CURRENT_TIMESTAMP >= start_date 
+                         AND CURRENT_TIMESTAMP <= end_date THEN 'active'
                     ELSE 'ended'
                 END AS status
-             FROM elections e
-             JOIN election_groups eg
-               ON e.election_group_id = eg.group_id
-             WHERE eg.is_closed = FALSE
-             ORDER BY e.created_at DESC
+             FROM elections
+             WHERE is_active = TRUE
+             ORDER BY created_at DESC
              LIMIT 1`
         );
 
@@ -256,12 +240,11 @@ exports.getElectionStatus = async (req, res) => {
         });
 
     } catch (err) {
-        res.status(500).json({
-            success: false,
-            message: err.message
-        });
+        console.error("Election Status Error:", err);
+        res.status(500).json({ success: false, message: err.message });
     }
 };
+
 ////////////////////////////////////////////////////////////
 // ✅ 4. Get All Elections
 ////////////////////////////////////////////////////////////
@@ -293,45 +276,10 @@ exports.deleteElection = async (req, res) => {
     try {
         const { id } = req.params;
 
-        // ✅ تأكد إن الانتخابات موجودة
-        const { rows: electionRows } = await pool.query(
-            'SELECT * FROM elections WHERE election_id = $1',
-            [id]
-        );
-
-        if (electionRows.length === 0) {
-            return res.status(404).json({
-                success: false,
-                message: "Election not found"
-            });
-        }
-
-        const groupId = electionRows[0].election_group_id;
-
-        // ✅ امسح الأصوات المرتبطة
-        await pool.query(
-            'DELETE FROM votes WHERE election_id = $1',
-            [id]
-        );
-
-        // ✅ امسح الانتخابات
         await pool.query(
             'DELETE FROM elections WHERE election_id = $1',
             [id]
         );
-
-        // ✅ لو الجروب فاضي امسحه
-        const { rows: remaining } = await pool.query(
-            'SELECT 1 FROM elections WHERE election_group_id = $1',
-            [groupId]
-        );
-
-        if (remaining.length === 0) {
-            await pool.query(
-                'DELETE FROM election_groups WHERE group_id = $1',
-                [groupId]
-            );
-        }
 
         res.json({
             success: true,
@@ -339,12 +287,10 @@ exports.deleteElection = async (req, res) => {
         });
 
     } catch (err) {
-        res.status(500).json({
-            success: false,
-            message: err.message
-        });
+        res.status(500).json({ success: false, message: err.message });
     }
 };
+
 ////////////////////////////////////////////////////////////
 // ✅ Get Governorates
 ////////////////////////////////////////////////////////////
